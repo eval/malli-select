@@ -1,0 +1,35 @@
+{:paths ["src"]
+ :deps  {}
+ :aliases
+ {:dev  {:extra-deps {metosin/malli                            {:mvn/version "0.8.9"}
+                      criterium/criterium                      {:mvn/version "0.4.6"}
+                      com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.5"}}}
+  :neil {:project {:name malli-select/malli-select}}
+
+  :malli-0.9
+  {:override-deps {metosin/malli {:mvn/version "0.9.2"}}}
+
+  :malli-0.10
+  {:override-deps {metosin/malli {:mvn/version "0.10.4"}}}
+
+  :malli-0.11
+  {:override-deps {metosin/malli {:mvn/version "0.11.0"}}}
+
+  :malli-0.12
+  {:override-deps {metosin/malli {:mvn/version "0.12.0"}}}
+
+  :test ;; added by neil
+  {:extra-paths ["test"]
+   :extra-deps  {metosin/malli                        {:mvn/version "0.8.9"}
+                 #_#_io.github.camsaul/humane-are         {:mvn/version "1.0.2"}
+                 io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :main-opts   ["-m" "cognitect.test-runner"]
+   :exec-fn     cognitect.test-runner.api/test}
+  :perf {#_#_:extra-paths ["perf"]
+         :extra-deps      {criterium/criterium                      {:mvn/version "0.4.6"}
+                           org.clojure/clojure                      {:mvn/version "1.11.1"}
+                           com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.5"}}
+         :jvm-opts        ["-server"
+                           "-Xmx4096m"
+                           "-Dclojure.compiler.direct-linking=true"
+                           "-Djdk.attach.allowAttachSelf"]}}}
