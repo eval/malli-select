@@ -80,7 +80,7 @@ Available: ([] [:addresses] [:age] [:name] [:addresses :country] [:addresses :st
 (empty? unknown-selections)
 ```
 
-See (the tests)[test/dk/thinkcreate/malli_select_test.clj] for more.
+See [the tests](./test/dk/thinkcreate/malli_select_test.clj) for more.
 
 ## Library
 
@@ -95,5 +95,5 @@ Add to `deps.edn`:
 
 ## LICENSE
 
-Copyright (c) 2023 Gert Goet, ThinkCreate
-Distributed under the MIT license. See LICENSE.
+Copyright (c) 2023 Gert Goet, ThinkCreate.
+Distributed under the MIT license. See [LICENSE](LICENSE).
