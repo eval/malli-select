@@ -90,7 +90,7 @@ Add to `deps.edn`:
 :deps { ,,,
        ;; bring Malli
        ;; metosin/malli {:mvn/version "0.12.0"}
-       com.github.eval/malli-select {:git/sha ",,,"}
+       com.github.eval/malli-select {:git/sha "be38f9355cca8bbde91448bebd9926f6f0694698"}
 }
 ```
 
