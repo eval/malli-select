@@ -18,6 +18,7 @@ user=> (require '[dk.thinkcreate.malli-select :as ms])
 user=> (def Person
          [:map
            [:name string?]
+           [:age pos-int?]
            [:addresses [:vector [:map
                                   [:street string?] [:zip string?]]]]])
 
@@ -25,7 +26,7 @@ user=> (def Person
 user=> (ms/select Person [:name])
 [:map
  [:name string?]
- [:age {:optional true} int?]
+ [:age {:optional true} pos-int?]
  [:addresses
   {:optional true}
   [:vector
@@ -37,7 +38,7 @@ user=> (ms/select Person [:name])
 user=> (ms/select Person [{:addresses [:street]}])
 [:map
  [:name {:optional true} string?]
- [:age {:optional true} int?]
+ [:age {:optional true} pos-int?]
  [:addresses
   {:optional true}
   [:vector
