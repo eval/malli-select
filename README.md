@@ -4,9 +4,6 @@ Create subschemas of [malli](https://github.com/metosin/malli)-schemas.
 
 It's based on Rich Hickey's ideas from his talk ["Maybe Not"](https://youtu.be/YR5WdGrpoug?feature=shared&t=1965) about how [spec-alpha2](https://github.com/clojure/spec-alpha2) might allow for schema reuse.
 
-
-Consider this library beta-grade.
-
 ## Quickstart
 
 Try it out using [deps-try](https://github.com/eval/deps-try/blob/master/README.md#installation):
@@ -72,13 +69,16 @@ user=> (mg/generate (ms/select Person ^:only [:name]))
 {:name "sNeLdUI5KtPw"}
 
 ;; selecting something not contained in the schema:
-user=> (ms/select Person [:foo])
-Execution error (AssertionError) at dk.thinkcreate.malli-select/select (malli_select.clj:239).
-Assert failed: Selection contains unknown paths: ([:foo])
+user=> (ms/select Person [:a])
+Execution error (AssertionError) at dk.thinkcreate.malli-select/select (malli_select.clj:175).
+Assert failed: Selection contains unknown paths: ([:a])
 
-Available: ([] [:addresses] [:age] [:name] [:addresses :country] [:addresses :street])
+Available:
+([:addresses] [:age] [:name] [:addresses :street] [:addresses :zip])
 
-(empty? unknown-selections)
+(empty? invalid-selection-paths)
+;; bypass this check:
+user=> (ms/select Person [:a] {:verify-selection false})
 ```
 
 See [the tests](./test/dk/thinkcreate/malli_select_test.clj) for more.
@@ -90,7 +90,7 @@ Add to `deps.edn`:
 :deps { ,,,
        ;; bring Malli
        ;; metosin/malli {:mvn/version "0.12.0"}
-       com.github.eval/malli-select {:git/sha "be38f9355cca8bbde91448bebd9926f6f0694698"}
+       com.github.eval/malli-select {:git/sha "eafb88ec94e0e86c864348aba2dee6cd4ef03efd"}
 }
 ```
 
