@@ -16,9 +16,12 @@
                           (conj! r phead)))))))
 
 
-(defn- schema-path-walker [f]
+(defn- map-schema-path-walker [f]
   (fn [schema path children _]
-    (f (m/-set-children schema children) path)))
+    (let [schema      (m/-set-children schema children)
+          map-schema? (= :map (m/type schema))]
+      (cond-> schema
+        map-schema? (f path)))))
 
 
 (defn- sel->map
@@ -121,13 +124,13 @@
                                         (-> selection meta :only))
            selection-paths          (parse-selection selection)
            sel-map                  (paths->tree selection-paths)
-           !available-paths (atom #{})
+           !available-paths         (atom #{})
            !seen                    (atom #{})
            record-seen!             (fn [schema path to-require]
                                       (when verify-selection?
                                         (let [available-keys (map first (m/entries schema))
-                                              valid-keys (into ['? '*] available-keys)
-                                              seen-keys  (filter to-require valid-keys)]
+                                              valid-keys     (into ['? '*] available-keys)
+                                              seen-keys      (filter to-require valid-keys)]
                                           (swap! !available-paths into
                                                  (map (partial conj path) available-keys))
                                           (swap! !seen into
@@ -137,41 +140,41 @@
                                       (when prune-optionals
                                         (let [self&parent-paths (take (inc (count path)) (iterate pop path))]
                                           (swap! !prune-exclusions into self&parent-paths))))
-           map-schema?              #(= :map (m/type %))
            walked
            (m/walk schema
-                   (schema-path-walker
+                   (map-schema-path-walker
                     (comp
-                     (fn prune [[schema path]]
-                       (if-not (and prune-optionals (map-schema? schema))
-                         schema
+                     (fn finalize [[schema]]
+                       schema)
+                     (fn prune [[schema path :as v]]
+                       (if-not prune-optionals
+                         v
                          (let [prunable? (every-pred (comp :optional second)
                                                      (comp not @!prune-exclusions #(conj path %) first))
                                children  (remove prunable? (m/children schema))]
-                           (m/into-schema (m/type schema) (m/-properties schema) children (m/-options schema)))))
-                     (fn require [[schema path :as args]]
-                       (if (or all-optional? (not (map-schema? schema)))
-                         args
+                           (update v 0 #(m/into-schema (m/type %) (m/-properties %)
+                                                       children (m/-options %))))))
+                     (fn require [[schema path :as v]]
+                       (if all-optional?
+                         v
                          (let [cleaned-path (clean-path path)
                                to-require   (sel-map cleaned-path)]
                            (if-not (seq to-require)
-                             args
+                             v
                              (let [star? (some #{'*} to-require)]
                                (record-seen! schema cleaned-path to-require)
                                (record-prune-exclusions! path)
-                               (update args 0
+                               (update v 0
                                        #(if star?
                                           (mu/required-keys %)
                                           (mu/required-keys % to-require))))))))
-                     (fn optionalize [[schema :as args]]
-                       (if-not (map-schema? schema)
-                         args
-                         (update args 0 mu/optional-keys)))
+                     (fn optionalize [v]
+                       (update v 0 mu/optional-keys))
                      (fn init [& args]
                        (vec args))))
                    {::m/walk-schema-refs true ::m/walk-refs true})]
        (when verify-selection?
-         (let [invalid-selection-paths  (remove @!seen selection-paths)]
+         (let [invalid-selection-paths (remove @!seen selection-paths)]
            (assert (empty? invalid-selection-paths)
                    (str "Selection contains unknown paths: " (prn-str invalid-selection-paths)
                         "\nAvailable: \n" (with-out-str (pprint (sort (selectable-paths schema))))))))
@@ -188,7 +191,7 @@
                            [:street string?]
                            [:country string?]]]]])
   (require '[criterium.core :as cc])
+
   (cc/quick-bench (select Person ^:only [:name {:addresses [:street]}]))
-  (m/form (select [:maybe Person] ^:only [{:name ['*]} {:friends [:name]}]))
 
   #_:end)
