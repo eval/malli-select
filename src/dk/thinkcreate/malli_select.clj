@@ -188,7 +188,7 @@
                            [:street string?]
                            [:country string?]]]]])
   (require '[criterium.core :as cc])
-
+  (cc/quick-bench (select Person ^:only [:name {:addresses [:street]}]))
   (m/form (select [:maybe Person] ^:only [{:name ['*]} {:friends [:name]}]))
-  
+
   #_:end)
