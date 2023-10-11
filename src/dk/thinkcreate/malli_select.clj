@@ -140,39 +140,38 @@
                                       (when prune-optionals
                                         (let [self&parent-paths (take (inc (count path)) (iterate pop path))]
                                           (swap! !prune-exclusions into self&parent-paths))))
-           walked
-           (m/walk schema
-                   (map-schema-path-walker
-                    (comp
-                     (fn finalize [[schema]]
-                       schema)
-                     (fn prune [[schema path :as v]]
-                       (if-not prune-optionals
-                         v
-                         (let [prunable? (every-pred (comp :optional second)
-                                                     (comp not @!prune-exclusions #(conj path %) first))
-                               children  (remove prunable? (m/children schema))]
-                           (update v 0 #(m/into-schema (m/type %) (m/-properties %)
-                                                       children (m/-options %))))))
-                     (fn require [[schema path :as v]]
-                       (if all-optional?
-                         v
-                         (let [cleaned-path (clean-path path)
-                               to-require   (sel-map cleaned-path)]
-                           (if-not (seq to-require)
-                             v
-                             (let [star? (some #{'*} to-require)]
-                               (record-seen! schema cleaned-path to-require)
-                               (record-prune-exclusions! path)
-                               (update v 0
-                                       #(if star?
-                                          (mu/required-keys %)
-                                          (mu/required-keys % to-require))))))))
-                     (fn optionalize [v]
-                       (update v 0 mu/optional-keys))
-                     (fn init [& args]
-                       (vec args))))
-                   {::m/walk-schema-refs true ::m/walk-refs true})]
+
+           walker (let [optionalize-step (fn optionalize-step [v]
+                                           (update v 0 mu/optional-keys))
+                        require-step     (fn require-step [[schema path :as v]]
+                                           (let [cleaned-path (clean-path path)
+                                                 to-require   (sel-map cleaned-path)]
+                                             (if-not (seq to-require)
+                                               v
+                                               (let [star? (some #{'*} to-require)]
+                                                 (record-seen! schema cleaned-path to-require)
+                                                 (record-prune-exclusions! path)
+                                                 (update v 0
+                                                         #(if star?
+                                                            (mu/required-keys %)
+                                                            (mu/required-keys % to-require)))))))
+
+                        prune-step  (fn prune-step [[schema path :as v]]
+                                      (let [prunable? (every-pred (comp :optional second)
+                                                                  (comp not @!prune-exclusions #(conj path %) first))
+                                            children  (remove prunable? (m/children schema))]
+                                        (update v 0 #(m/into-schema (m/type %) (m/-properties %)
+                                                                    children (m/-options %)))))
+                        wrap        (fn [stack step]
+                                      #(step (stack %)))
+                        middlewares (cond-> identity
+                                      :always             (wrap optionalize-step)
+                                      (not all-optional?) (wrap require-step)
+                                      prune-optionals     (wrap prune-step)
+                                      :finally            (wrap first))]
+                    (map-schema-path-walker (comp middlewares vector)))
+           walked (m/walk schema walker
+                          {::m/walk-schema-refs true ::m/walk-refs true})]
        (when verify-selection?
          (let [invalid-selection-paths (remove @!seen selection-paths)]
            (assert (empty? invalid-selection-paths)
@@ -192,6 +191,8 @@
                            [:country string?]]]]])
   (require '[criterium.core :as cc])
 
-  (cc/quick-bench (select Person ^:only [:name {:addresses [:street]}]))
+  (cc/quick-bench (select Person ^:only [:name {:addresses [:street]}]))  
+  (m/form (select [:maybe Person] ^:only [:name {:friends [:name]}]))
+
 
   #_:end)
