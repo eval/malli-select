@@ -2,12 +2,15 @@
   (:require
    [clojure.pprint :refer [pprint]]
    [clojure.test :as t :refer [deftest is testing]]
-   [dk.thinkcreate.malli-select :refer [select]]
+   [dk.thinkcreate.malli-select :as sut :refer [select selector]]
    [malli.core :as m]
    [malli.util :as mu]))
 
 (defonce ^:private ^:dynamic
   *schema* nil)
+
+(defonce ^:private ^:dynamic
+  *selector* nil)
 
 (defn pps [o]
   (with-out-str (pprint o)))
@@ -15,21 +18,21 @@
 (defmacro expect-selection-to-validate [sel & data+maybe-reason]
   `(if ~sel
      (let [data#       ~(first data+maybe-reason)
-          sel-schema# (select *schema* ~sel (meta ~sel))
-          result#     (or (m/validate sel-schema# data#) (m/explain sel-schema# data#))]
-      (is (true? result#)
-          (cond-> (str "Expected data:\n" (pps data#) "to be valid given schema:\n" (pps (m/form sel-schema#)))
-            ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason))
-            :always                     (str "\nvalidate errors:\n" (pps (:errors result#))))))
+           sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))
+           result#     (or (m/validate sel-schema# data#) (m/explain sel-schema# data#))]
+       (is (true? result#)
+           (cond-> (str "Expected data:\n" (pps data#) "to be valid given schema:\n" (pps (m/form sel-schema#)))
+             ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason))
+             :always                     (str "\nvalidate errors:\n" (pps (:errors result#))))))
      *schema*))
 
 (defmacro expect-selection-to-invalidate [sel & data+maybe-reason]
   `(if ~sel
      (let [data#       ~(first data+maybe-reason)
-          sel-schema# (select *schema* ~sel (meta ~sel))]
-      (is (false? (m/validate sel-schema# data#))
-          (cond-> (str "Expected data:\n" (pps data#) "to be *invalid* given schema:\n" (pps (m/form sel-schema#)))
-            ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason)))))
+           sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))]
+       (is (false? (m/validate sel-schema# data#))
+           (cond-> (str "Expected data:\n" (pps data#) "to be *invalid* given schema:\n" (pps (m/form sel-schema#)))
+             ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason)))))
      *schema*))
 
 
@@ -185,15 +188,29 @@
                             [:map
                              [:this boolean?]
                              [:that "Other"]]]]
-          (expect-selection-to-validate ^{:prune-optionals true} []
-                                        {:that {:other "?"}}
-                                        ":other can be a string as it should no longer be part of the schema"))))
+          (expect-selection-to-validate  ^:only []
+                                         {:that {:other "?"}}
+                                         ":other can be a string as it should no longer be part of the schema"))))
     (testing "verify-selection"
       (is (thrown-with-msg? AssertionError #"unknown paths: \(\[:a\]\)"
                             (select int? [:a])))
       (testing "disabling it"
         (is (some? (select int? [:a] {:verify-selection :skip})))
         (is (some? (select int? [:a] {:verify-selection nil})))))))
+
+(deftest selector-test
+  (binding [*selector* (selector [:map
+                                  [:name string?]
+                                  [:age int?]
+                                  [:addresses [:maybe [:vector [:map
+                                                                [:street string?]
+                                                                [:zip int?]]]]]])]
+    (expect-selection-to-validate  [:name]
+                                   {:name "Foo"}
+                                   "All but :name optional")
+    (expect-selection-to-invalidate  [:name]
+                                     {:name "Foo" :age "NaN"}
+                                     "All but :name optional")))
 
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})
