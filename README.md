@@ -89,8 +89,8 @@ Add to `deps.edn`:
 ``` clojure
 :deps { ,,,
        ;; bring Malli
-       ;; metosin/malli {:mvn/version "0.12.0"}
-       com.github.eval/malli-select {:git/sha "eafb88ec94e0e86c864348aba2dee6cd4ef03efd"}
+       ;; metosin/malli {:mvn/version "0.13.0"}
+       com.github.eval/malli-select {:git/sha "2bbf6adec58be32ed8d6424b985a7fae6d8cee46"}
 }
 ```
 
