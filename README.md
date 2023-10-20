@@ -1,6 +1,8 @@
 # malli-select
 
-Create subschemas of [malli](https://github.com/metosin/malli)-schemas.
+[![Clojars Project](https://img.shields.io/clojars/v/dk.thinkcreate/malli-select.svg?include_prereleases)](https://clojars.org/dk.thinkcreate/malli-select)
+
+Create subschemas of [malli](https://github.com/metosin/malli)-schemas using a spec2-inspired select notation.
 
 It's based on Rich Hickey's ideas from his talk ["Maybe Not"](https://youtu.be/YR5WdGrpoug?feature=shared&t=1965) about how [spec-alpha2](https://github.com/clojure/spec-alpha2) might allow for schema reuse.
 
@@ -83,16 +85,6 @@ user=> (ms/select Person [:a] {:verify-selection false})
 
 See [the tests](./test/dk/thinkcreate/malli_select_test.clj) for more.
 
-## Library
-
-Add to `deps.edn`:
-``` clojure
-:deps { ,,,
-       ;; bring Malli
-       ;; metosin/malli {:mvn/version "0.13.0"}
-       com.github.eval/malli-select {:git/sha "2bbf6adec58be32ed8d6424b985a7fae6d8cee46"}
-}
-```
 
 ## LICENSE
 
