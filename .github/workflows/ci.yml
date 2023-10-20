@@ -12,7 +12,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Install clojure tools
-        uses: DeLaGuardo/setup-clojure@9.4
+        uses: DeLaGuardo/setup-clojure@10.0
         with:
           cli: latest
       - name: Run tests
