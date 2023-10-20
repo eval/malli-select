@@ -60,14 +60,18 @@
 
 
 (defn selectable-paths
-  "
+  "Yield set of selectable paths.
+
   Examples:
+  ```
   (selectable-paths
     [:maybe
       [:map
         [:addresses [:vector [:map
                                [:street string?]]]]]])
-  ;;=> #{[:addresses] [:addresses :street]}"
+  ;;=> #{[:addresses] [:addresses :street]}
+  ```
+  "
   [schema]
   (->> schema
        mu/subschemas
