@@ -1,6 +1,6 @@
 # malli-select
 
-[![Clojars Project](https://img.shields.io/clojars/v/dk.thinkcreate/malli-select.svg?include_prereleases)](https://clojars.org/dk.thinkcreate/malli-select)
+[![Clojars Project](https://img.shields.io/clojars/v/dk.thinkcreate/malli-select.svg?include_prereleases)](https://clojars.org/dk.thinkcreate/malli-select) [![cljdoc badge](https://cljdoc.org/badge/dk.thinkcreate/malli-select)](https://cljdoc.org/d/dk.thinkcreate/malli-select)
 
 Create subschemas of [malli](https://github.com/metosin/malli)-schemas using a spec2-inspired select notation.
 
