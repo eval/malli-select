@@ -60,7 +60,8 @@
 
 
 (defn selectable-paths
-  "Examples:
+  "
+  Examples:
   (selectable-paths
     [:maybe
       [:map
@@ -151,15 +152,15 @@
 
 (defn select
   "`selection` examples:
-  `[]` - everything (deep) optional
-  `[:name :age]` - required attributes
-  `['*]` - everything (non-recursive) required
-  `[{:address [:street]}]` - if `:address` provided then only `:street` is required.
+  - `[]` - everything (deep) optional
+  - `[:name :age]` - required attributes
+  - `['*]` - everything (non-recursive) required
+  - `[{:address [:street]}]` - if `:address` provided then only `:street` is required.
 
   Combinations:
-  `[:address {:address [:street]}]` - require `:address` but only its `:street` is required.
-  `[:address {:address [] :friends [:name]}]` - require `:address` and optionally `:friends`.
-  `[{:friends [:name]} {:friends [:age]}]` - only require `:age` of friends if `:friends` provided (last selection wins).
+  - `[:address {:address [:street]}]` - require `:address` but only its `:street` is required.
+  - `[:address {:address [] :friends [:name]}]` - require `:address` and optionally `:friends`.
+  - `[{:friends [:name]} {:friends [:age]}]` - only require `:age` of friends if `:friends` provided (last selection wins).
 
   `options`:
   - `verify-selection` (`:assert` (default), `:skip`, `false`, `nil`) - what to do when `selection` contains paths not in `schema`.
