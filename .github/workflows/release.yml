@@ -23,7 +23,7 @@ jobs:
           cli: latest
 
       - name: Build jar
-        run: clojure -T:build ci :git-version $(printf '"%s"'  $(git describe --tags))
+        run: clojure -T:build build :git-version $(printf '"%s"'  $(git describe --tags))
 
       - name: Release to clojars
         continue-on-error: true
