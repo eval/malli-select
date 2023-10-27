@@ -16,4 +16,4 @@ jobs:
         with:
           cli: latest
       - name: Run tests
-        run: clojure -X:test
+        run: clojure -T:build test

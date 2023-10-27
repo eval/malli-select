@@ -6,6 +6,8 @@
             [deps-deploy.deps-deploy :as dd]
             [clojure.java.io :as io]))
 
+(set! clojure.core/*print-namespace-maps* false)
+
 ;; Monkey patch to have provided dependencies in the POM
 ;; SOURCE https://clojurians.zulipchat.com/#narrow/stream/180378-slack-archive/topic/tools-deps/near/326868214
 (xml/alias-uri 'pom "http://maven.apache.org/POM/4.0.0")
@@ -28,7 +30,7 @@
         cmds           (b/java-command
                         {:basis     basis
                          :main      'clojure.main
-                         :main-args (doto (reduce into ["-m" "cognitect.test-runner"] opts) prn)})
+                         :main-args (doto (reduce into ["-m" "cognitect.test-runner"] opts) #_prn)})
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit) (throw (ex-info "Tests failed" {}))))
   opts)
@@ -110,27 +112,33 @@
        :content
        first))
 
-(defn deploy "Deploy the JAR to Clojars." [opts]
+(defn deploy [{:deploy/keys [only-jar-version-type] :or {only-jar-version-type :full} :as opts}]
+  {:pre [(#{:full-and-snapshot :full :all} only-jar-version-type)]}
   (let [{:keys [jar-file] :as opts} (jar-opts opts)
         pom-file                    (b/pom-path (select-keys opts [:lib :class-dir]))
         version                     (pom-path->version pom-file)
-        deployable-version-re       #"^\d+\.\d+\.\d+(-SNAPSHOT)?$"]
-    (when-not (re-find deployable-version-re version)
-      (throw (ex-info (str "Can't deploy build-version"
-                           " (version: "
-                           (pr-str version) ")") {})))
-    (dd/deploy {:installer :remote
-                :artifact  (b/resolve-path jar-file)
-                :pom-file  pom-file}))
-  opts)
+        [v s]                       (re-find #"^\d+\.\d+\.\d+(-SNAPSHOT)?$" version)
+        deploy?                     (or (= :all only-jar-version-type)
+                                        (and (= :full-and-snapshot only-jar-version-type) v)
+                                        (and (= :full only-jar-version-type)
+                                             v
+                                             (not s)))]
+    (if deploy?
+      (dd/deploy {:installer :remote
+                  :artifact  (b/resolve-path jar-file)
+                  :pom-file  pom-file})
+      (println (str \newline "Skipping deploy of version " version " given only-jar-release-type " only-jar-version-type)))
+    opts))
+
 
 (defn release
-  "build&deploy"
+  "Test, build and deploy"
   [opts]
+  (prn :release-opts opts)
   (deploy (build (test opts))))
 
 (comment
-  (set! clojure.core/*print-namespace-maps* false)
+  
 
   (def jopts (jar-opts {}))
   jopts
