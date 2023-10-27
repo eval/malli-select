@@ -1,5 +1,5 @@
 ---
-name: Release
+name: Test, build and (possibly) deploy
 
 on:
   push:
@@ -22,9 +22,8 @@ jobs:
         with:
           cli: latest
 
-      - name: Build and deploy to clojars
-        continue-on-error: true
+      - name: Test, build and (possibly) deploy to clojars
         env:
           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
-        run: clojure -T:build release :git-version $(printf '"%s"'  $(git describe --tags))
+        run: clojure -T:build release :git-version $(printf '"%s"'  $(git describe --tags)) :deploy/only-jar-version-type :full-and-snapshot

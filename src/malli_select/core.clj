@@ -1,4 +1,4 @@
-(ns dk.thinkcreate.malli-select
+(ns malli-select.core
   "Select a subset of a malli schema."
   (:require [clojure.pprint :refer [pprint]]
             [malli.core :as m]
