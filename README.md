@@ -13,7 +13,7 @@ Try it out using [deps-try](https://github.com/eval/deps-try/blob/master/README.
 ``` clojure
 $ deps-try io.github.eval/malli-select metosin/malli
 
-user=> (require '[dk.thinkcreate.malli-select :as ms])
+user=> (require '[malli-select.core :as ms])
 user=> (def Person
          [:map
            [:name string?]
@@ -83,7 +83,7 @@ Available:
 user=> (ms/select Person [:a] {:verify-selection false})
 ```
 
-See [the tests](./test/dk/thinkcreate/malli_select_test.clj) for more.
+See [the tests](./test/malli_select/core_test.clj) for more.
 
 
 ## LICENSE

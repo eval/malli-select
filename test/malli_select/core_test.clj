@@ -1,8 +1,8 @@
-(ns dk.thinkcreate.malli-select-test
+(ns malli-select.core-test
   (:require
    [clojure.pprint :refer [pprint]]
    [clojure.test :as t :refer [deftest is testing]]
-   [dk.thinkcreate.malli-select :as sut :refer [select selector]]
+   [malli-select.core :as sut :refer [select selector]]
    [malli.core :as m]
    [malli.util :as mu]))
 
