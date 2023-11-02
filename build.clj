@@ -1,4 +1,5 @@
 (ns build
+  "Build malli-select"
   (:refer-clojure :exclude [test])
   (:require [clojure.data.xml :as xml]
             [clojure.tools.build.api :as b]
@@ -24,17 +25,27 @@
 
 (def class-dir "target/classes")
 
-(defn test "Run all the tests." [opts]
-  (let [opts           (map #(map name %) opts)
+(defn ^#:fika{:examples [":d '\"some-dir\"'" ":n '\"some.namespace-test\"'" "# see all runner options\n:H true"]}
+  test "Run all the tests.
+
+  Passing options to test-runner possible, see examples." [opts]
+  #_(prn :opts opts)
+  (let [opts           (update-vals (update-keys opts (fn [k] (let [k (name k)]
+                                                    (cond-> (str "-" k)
+                                                      (> (count k) 1) (str "-")))))
+                                    str)
         basis          (b/create-basis {:aliases [:test]})
-        cmds           (b/java-command
-                        {:basis     basis
-                         :main      'clojure.main
-                         :main-args (doto (reduce into ["-m" "cognitect.test-runner"] opts) #_prn)})
+        cmds           (doto (b/java-command
+                              {:basis         basis
+                               :main          'clojure.main
+                               #_#_:cp        ["/opt/homebrew/Cellar/clojure/1.11.1.1413/libexec/exec.jar"]
+                               #_#_:main-args ["-m" "clojure.run.exec" ":dirs" "src"]
+                               :main-args     (doto (reduce into ["-m" "cognitect.test-runner"] opts) prn)}))
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit) (throw (ex-info "Tests failed" {}))))
   opts)
 
+(b/java-command {:basis (b/create-basis {:aliases [:test]}) :main 'clojure.main})
 (defn- pom-template [version version-type]
   [[:description "spec2-inspired selection of Malli schemas"]
    [:url "https://github.com/eval/malli-select"]
@@ -83,14 +94,15 @@
 
   #_:end)
 
-(defn build
-  "Build the JAR.
-  Usage:
-  $ clojure -T:build build :git-version $(printf '\" %s \"' $(git describe --tags))"
-  [{:keys [git-version] :as opts}]
+(defn
+  ^#:fika{:option.git-version {:name :build/git-version
+                               :desc "Output of `git describe --tags`, e.g. \"v1.2.3\", \"v1.2.3-pre.1\""}}
+  build
+  "Build the JAR."
+  [{:build/keys [git-version] :as opts}]
   {:pre [(let [git-version-re #"^v\d+\.\d+\.\d+"]
            (or (and git-version (re-find git-version-re git-version))
-               (throw (ex-info (str "requires :git-version with value matching " (pr-str git-version-re) ", e.g. :git-version '\"v1.2.3\"\"'") {}))))]}
+               (throw (ex-info (str "requires :build/git-version with value matching " (pr-str git-version-re) ", e.g. :build/git-version '\"v1.2.3\"\"'") {}))))]}
   (let [opts (merge opts (git-version->version&type git-version))]
     (b/delete {:path "target"})
     (let [opts (jar-opts opts)]
@@ -112,7 +124,13 @@
        :content
        first))
 
-(defn deploy [{:deploy/keys [only-jar-version-type] :or {only-jar-version-type :full} :as opts}]
+(defn
+  ^#:fika{:option.only-jar-version-type
+          {:name "deploy/only-jar-version-type"
+           :desc "Deploy the built jar based on the type of version it has. One of :full (default, e.g. \"1.2.3\"), :full-and-snapshot (also jar-versions like \"1.2.3-SNAPSHOT\"), :all (any jar that was built)."}}
+  deploy
+  "Deploy the built jar."
+  [{:deploy/keys [only-jar-version-type] :or {only-jar-version-type :full} :as opts}]
   {:pre [(#{:full-and-snapshot :full :all} only-jar-version-type)]}
   (let [{:keys [jar-file] :as opts} (jar-opts opts)
         pom-file                    (b/pom-path (select-keys opts [:lib :class-dir]))
@@ -131,10 +149,17 @@
     opts))
 
 
-(defn release
-  "Test, build and deploy"
+(defn ^#:fika{:examples [":build/git-version '\"v1.2.3\"'"
+                         ":build/git-version $(printf '\"%s\"'  $(git describe --tags))"
+                         ":build/git-version '\"v1.2.3\"' :deploy/only-jar-version-type :full-and-snapshot"]
+
+              :options.from-commands            '[test build deploy]}
+  release
+  "Test, build and deploy.
+
+Deploys *only* when name of the jar built has the right format, see option `deploy/only-jar-version-type`."
   [opts]
-  (prn :release-opts opts)
+  #_(prn :release-opts opts)
   (deploy (build (test opts))))
 
 (comment
