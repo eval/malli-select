@@ -26,4 +26,4 @@ jobs:
         env:
           CLOJARS_USERNAME: ${{ secrets.CLOJARS_USERNAME }}
           CLOJARS_PASSWORD: ${{ secrets.CLOJARS_PASSWORD }}
-        run: clojure -T:build release :git-version $(printf '"%s"'  $(git describe --tags)) :deploy/only-jar-version-type :full-and-snapshot
+        run: clojure -T:build release :build/git-version $(printf '"%s"'  $(git describe --tags)) :deploy/only-jar-version-type :full-and-snapshot
