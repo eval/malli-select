@@ -40,7 +40,7 @@
   Passing options to test-runner possible, see examples." [opts]
   #_(prn :opts opts)
   (let [test-options   (extract-keys-with-ns "test" opts)
-        opts           (-> test-options
+        test-options   (-> test-options
                            (update-keys (fn [k]
                                           ;; :H => "-H", :help => "--help"
                                           (let [k (name k)]
@@ -53,7 +53,7 @@
                                :main          'clojure.main
                                #_#_:cp        ["/opt/homebrew/Cellar/clojure/1.11.1.1413/libexec/exec.jar"]
                                #_#_:main-args ["-m" "clojure.run.exec" ":dirs" "src"]
-                               :main-args     (doto (reduce into ["-m" "cognitect.test-runner"] opts) prn)}))
+                               :main-args     (doto (reduce into ["-m" "cognitect.test-runner"] test-options) prn)}))
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit) (throw (ex-info "Tests failed" {}))))
   opts)
@@ -108,7 +108,8 @@
   #_:end)
 
 (defn
-  ^#:fika{:option.git-version {:name :build/git-version
+  ^#:fika{:examples           [":build/git-version $(printf '\"%s\"'  $(git describe --tags))"]
+          :option.git-version {:name :build/git-version
                                :desc "Output of `git describe --tags`, e.g. \"v1.2.3\", \"v1.2.3-pre.1\""}}
   build
   "Build the JAR."
