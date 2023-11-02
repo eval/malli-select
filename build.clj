@@ -25,15 +25,28 @@
 
 (def class-dir "target/classes")
 
-(defn ^#:fika{:examples [":d '\"some-dir\"'" ":n '\"some.namespace-test\"'" "# see all runner options\n:H true"]}
-  test "Run all the tests.
+(defn- extract-keys-with-ns
+  "E.g. `{:test/H true :foo :bar} ;;=> {:H true}`"
+  [ns m]
+  (update-keys (filter (comp #(= (name ns) %) namespace key) m)
+               (comp keyword name)))
+
+(defn ^#:fika{:examples [":test/d '\"some-dir\"'"
+                         ":test/n '\"some.namespace-test\"'"
+                         "# see all runner options\n:test/H true"]}
+  test
+  "Run all the tests.
 
   Passing options to test-runner possible, see examples." [opts]
   #_(prn :opts opts)
-  (let [opts           (update-vals (update-keys opts (fn [k] (let [k (name k)]
-                                                    (cond-> (str "-" k)
-                                                      (> (count k) 1) (str "-")))))
-                                    str)
+  (let [test-options   (extract-keys-with-ns "test" opts)
+        opts           (-> test-options
+                           (update-keys (fn [k]
+                                          ;; :H => "-H", :help => "--help"
+                                          (let [k (name k)]
+                                            (cond->> (str "-" k)
+                                              (> (count k) 1) (str "-")))))
+                           (update-vals str))
         basis          (b/create-basis {:aliases [:test]})
         cmds           (doto (b/java-command
                               {:basis         basis
