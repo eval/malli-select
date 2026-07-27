@@ -6,6 +6,11 @@ on: [push, pull_request]
 jobs:
   Test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        malli: ["0.14", "0.15", "0.16", "0.17", "0.18", "0.19", "latest", "head"]
+    continue-on-error: ${{ matrix.malli == 'head' }}
     steps:
       - name: Check out repository code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -15,5 +20,18 @@ jobs:
         uses: DeLaGuardo/setup-clojure@4c7a6f613e5089821bb3bb2a33a3ee115578580d # 13.6.1
         with:
           cli: latest
-      - name: Run tests
-        run: clojure -T:build test
+      - name: Run tests (malli ${{ matrix.malli }})
+        run: |
+          case "${{ matrix.malli }}" in
+            latest)
+              clojure -X:test
+              ;;
+            head)
+              sha=$(git ls-remote https://github.com/metosin/malli.git HEAD | cut -f1)
+              echo "Testing against metosin/malli@$sha"
+              clojure -Sdeps "{:aliases {:malli-head {:override-deps {metosin/malli {:git/url \"https://github.com/metosin/malli.git\" :git/sha \"$sha\"}}}}}" -X:test:malli-head
+              ;;
+            *)
+              clojure -X:test:malli-${{ matrix.malli }}
+              ;;
+          esac
