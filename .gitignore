@@ -26,3 +26,10 @@
 /checkouts
 /classes
 /target
+
+/.worktree.yml
+/.claude
+/bin/worktree-dev
+
+/tmp/*
+!/tmp/.keep
