@@ -88,5 +88,5 @@ See [the tests](./test/malli_select/core_test.clj) for more.
 
 ## LICENSE
 
-Copyright (c) 2023 Gert Goet, ThinkCreate.
+Copyright (c) 2026 Gert Goet, ThinkCreate.
 Distributed under the MIT license. See [LICENSE](LICENSE).
