@@ -33,7 +33,7 @@ The workflow runs on every push to `main` and on every tag:
 clojure -T:build release :build/git-version $(printf '"%s"' $(git describe --tags)) :deploy/only-jar-version-type :full-and-snapshot
 ```
 
-`release` (see [build.clj](build.clj)) chains `test` → `build` → `deploy`.
+`release` (see [build.clj](build.clj)) chains `test` → `test-cljs` → `build` → `deploy`.
 The output of `git describe --tags` determines the version and whether the
 built jar is actually deployed:
 
@@ -83,5 +83,6 @@ CLOJARS_USERNAME=... CLOJARS_PASSWORD=<deploy-token> \
 
 - `git describe --tags` needs the full history: the checkout step uses
   `fetch-depth: 0` for this — keep it when touching the workflow.
-- Tests run against the `:test` alias; a test failure aborts the release
-  before anything is built or deployed.
+- Tests run on both the JVM (`:test` alias) and ClojureScript/Node
+  (`:cljs-test` alias); a failure in either suite aborts the release before
+  anything is built or deployed.

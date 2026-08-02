@@ -80,7 +80,7 @@
 
 (b/java-command {:basis (b/create-basis {:aliases [:test]}) :main 'clojure.main})
 (defn- pom-template [version version-type]
-  [[:description "spec2-inspired selection of Malli schemas"]
+  [[:description "Create subschemas of malli-schemas using a spec2-inspired select notation. Works on Clojure and ClojureScript."]
    [:url "https://github.com/eval/malli-select"]
    [:licenses
     [:license

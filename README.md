@@ -2,7 +2,7 @@
 
 [![Clojars Project](https://img.shields.io/clojars/v/dk.thinkcreate/malli-select.svg?include_prereleases)](https://clojars.org/dk.thinkcreate/malli-select) [![cljdoc badge](https://cljdoc.org/badge/dk.thinkcreate/malli-select)](https://cljdoc.org/d/dk.thinkcreate/malli-select) [![Tests](https://github.com/eval/malli-select/actions/workflows/ci.yml/badge.svg)](https://github.com/eval/malli-select/actions/workflows/ci.yml)
 
-Create subschemas of [malli](https://github.com/metosin/malli)-schemas using a spec2-inspired select notation.
+Create subschemas of [malli](https://github.com/metosin/malli)-schemas using a spec2-inspired select notation. Works on Clojure and ClojureScript.
 
 It's based on Rich Hickey's ideas from his talk ["Maybe Not"](https://youtu.be/YR5WdGrpoug?feature=shared&t=1965) about how [spec-alpha2](https://github.com/clojure/spec-alpha2) might allow for schema reuse.
 
@@ -86,7 +86,13 @@ user=> (ex-data *e)
 
 ;; bypass this check:
 user=> (ms/select Person [:a] {:verify-selection false})
+;; :verify-selection defaults to :throw (`:assert`, the pre-v0.8 spelling, still works);
+;; :skip, nil and false disable the check.
 ```
+
+> [!NOTE]
+> Before v0.8 an invalid selection threw an `AssertionError` instead of an
+> `ExceptionInfo` — see the [CHANGELOG](CHANGELOG.md) if you were catching it.
 
 See [the tests](./test/malli_select/core_test.cljc) for more.
 

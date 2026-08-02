@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- ClojureScript support: the library is now `.cljc` and tested on Node
+  (`clojure -M:cljs-test`) as well as the JVM.
+
 ### Breaking
 
 - An invalid selection now throws an `ExceptionInfo` instead of an `AssertionError`.
