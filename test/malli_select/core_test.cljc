@@ -1,10 +1,10 @@
 (ns malli-select.core-test
+  #?(:cljs (:require-macros [malli-select.core-test]))
   (:require
    [clojure.pprint :refer [pprint]]
    [clojure.test :as t :refer [deftest is testing]]
    [malli-select.core :as sut :refer [select selector]]
-   [malli.core :as m]
-   [malli.util :as mu]))
+   [malli.core :as m]))
 
 (defonce ^:private ^:dynamic
   *schema* nil)
@@ -192,11 +192,11 @@
                                          {:that {:other "?"}}
                                          ":other can be a string as it should no longer be part of the schema"))))
     (testing "verify-selection"
-      (is (thrown? clojure.lang.ExceptionInfo
+      (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
                    (select int? [:a])))
       (let [ex-data (try
                       (select [:map [:name string?]] [:a])
-                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+                      (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
         (is (= ::sut/unknown-paths (:type ex-data)))
         (is (= '([:a]) (:paths (:data ex-data))))
         (is (= '([:name]) (:available (:data ex-data)))))

@@ -75,7 +75,7 @@ user=> (mg/generate (ms/select Person ^:only [:name]))
 
 ;; selecting something not contained in the schema:
 user=> (ms/select Person [:a])
-Execution error (ExceptionInfo) at malli-select.core/-fail! (core.clj:7).
+Execution error (ExceptionInfo) at malli-select.core/-fail! (core.cljc:7).
 :malli-select.core/unknown-paths {:paths ([:a]), :available ([:addresses :street] [:addresses :zip] [:addresses] [:age] [:name])}
 
 ;; the unknown and available paths are also in the ex-data:
@@ -88,7 +88,7 @@ user=> (ex-data *e)
 user=> (ms/select Person [:a] {:verify-selection false})
 ```
 
-See [the tests](./test/malli_select/core_test.clj) for more.
+See [the tests](./test/malli_select/core_test.cljc) for more.
 
 
 ## LICENSE
