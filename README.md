@@ -94,6 +94,9 @@ user=> (ms/select Person [:a] {:verify-selection :log})
 WARNING: :malli-select.core/unknown-paths {:paths ([:a]), :available (...)}
 ;; ...and a function gets the report, e.g.:
 user=> (ms/select Person [:a] {:verify-selection #(log/warn "unknown paths" (:paths %))})
+
+;; change the default via the dynamic var ms/*verify-selection*:
+user=> (alter-var-root #'ms/*verify-selection* (constantly :log)) ;; CLJS: (set! ms/*verify-selection* :log)
 ```
 
 > [!NOTE]

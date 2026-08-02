@@ -3,6 +3,14 @@
   (:require [malli.core :as m]
             [malli.util :as mu]))
 
+(def ^:dynamic *verify-selection*
+  "Default for the `:verify-selection` option of `select`/`selector`.
+  See `select` for accepted values.
+
+  Rebind with `binding`, or set app-wide via `alter-var-root`
+  (Clojure) / `set!` (ClojureScript)."
+  :throw)
+
 (defn- -fail! [type data]
   (throw (ex-info (str type " " (pr-str data)) {:type type :data data})))
 
@@ -93,7 +101,7 @@
     ::keys [optionalized]
     :keys [verify-selection prune-optionals]
     :or
-    {verify-selection :throw}}]
+    {verify-selection *verify-selection*}}]
   (letfn [(in? [coll elm]
             (some #(= % elm) coll))]
     (let [all-optional?            (empty? selection)
@@ -178,8 +186,8 @@
   - `[{:friends [:name]} {:friends [:age]}]` - only require `:age` of friends if `:friends` provided (last selection wins).
 
   `options`:
-  - `verify-selection` - what to do when `selection` contains paths not in `schema`:
-    - `:throw` (default, `:assert` works as well) - throw an `ExceptionInfo` with `{:type ::unknown-paths :data {:paths ... :available ...}}` as `ex-data`.
+  - `verify-selection` - what to do when `selection` contains paths not in `schema`. Defaults to `*verify-selection*` (initially `:throw`):
+    - `:throw` (`:assert` works as well) - throw an `ExceptionInfo` with `{:type ::unknown-paths :data {:paths ... :available ...}}` as `ex-data`.
     - `:log` - print a warning (stderr on Clojure, `console.warn` on ClojureScript) and continue.
     - a function - called with `{:paths ... :available ...}`, result ignored, selection continues.
     - `:skip`, `false`, `nil` - don't verify.
@@ -203,7 +211,7 @@
    (select schema selection nil))
   ([schema selection {:as   options
                       :keys [verify-selection prune-optionals]
-                      :or   {verify-selection :throw}}]
+                      :or   {verify-selection *verify-selection*}}]
    (-select schema selection (assoc options
                                     :verify-selection verify-selection
                                     :prune-optionals prune-optionals))))

@@ -10,6 +10,9 @@
   the `:skip`/`nil`/`false` opt-outs: `:log` (print a warning — stderr on
   Clojure, `console.warn` on ClojureScript — and continue) and a function
   (called with `{:paths ... :available ...}`, selection continues).
+- The dynamic var `*verify-selection*` (initially `:throw`) provides the
+  default for the `:verify-selection` option; an explicitly passed option
+  still wins.
 
 ### Breaking
 

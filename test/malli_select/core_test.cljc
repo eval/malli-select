@@ -217,7 +217,17 @@
           (is (= '([:name]) (:available @!report)))))
       (testing "disabling it"
         (is (some? (select int? [:a] {:verify-selection :skip})))
-        (is (some? (select int? [:a] {:verify-selection nil})))))))
+        (is (some? (select int? [:a] {:verify-selection nil}))))
+      (testing "*verify-selection* provides the default"
+        (let [!report (atom nil)]
+          (binding [sut/*verify-selection* (partial reset! !report)]
+            (is (some? (select [:map [:name string?]] [:a])))
+            (is (= '([:a]) (:paths @!report)))
+            ;; explicitly passed option wins
+            (reset! !report nil)
+            (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+                         (select int? [:a] {:verify-selection :throw})))
+            (is (nil? @!report))))))))
 
 (deftest selector-test
   (binding [*selector* (selector [:map
