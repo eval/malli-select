@@ -75,13 +75,15 @@ user=> (mg/generate (ms/select Person ^:only [:name]))
 
 ;; selecting something not contained in the schema:
 user=> (ms/select Person [:a])
-Execution error (AssertionError) at dk.thinkcreate.malli-select/select (malli_select.clj:175).
-Assert failed: Selection contains unknown paths: ([:a])
+Execution error (ExceptionInfo) at malli-select.core/-fail! (core.clj:7).
+:malli-select.core/unknown-paths {:paths ([:a]), :available ([:addresses :street] [:addresses :zip] [:addresses] [:age] [:name])}
 
-Available:
-([:addresses] [:age] [:name] [:addresses :street] [:addresses :zip])
+;; the unknown and available paths are also in the ex-data:
+user=> (ex-data *e)
+{:type :malli-select.core/unknown-paths,
+ :data {:paths ([:a]),
+        :available ([:addresses :street] [:addresses :zip] [:addresses] [:age] [:name])}}
 
-(empty? invalid-selection-paths)
 ;; bypass this check:
 user=> (ms/select Person [:a] {:verify-selection false})
 ```

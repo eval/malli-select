@@ -1,8 +1,10 @@
 (ns malli-select.core
   "Select a subset of a malli schema."
-  (:require [clojure.pprint :refer [pprint]]
-            [malli.core :as m]
+  (:require [malli.core :as m]
             [malli.util :as mu]))
+
+(defn- -fail! [type data]
+  (throw (ex-info (str type " " (pr-str data)) {:type type :data data})))
 
 (defn- clean-path [path]
   (loop [p path
@@ -86,7 +88,7 @@
     ::keys [optionalized]
     :keys [verify-selection prune-optionals]
     :or
-    {verify-selection :assert}}]
+    {verify-selection :throw}}]
   (letfn [(in? [coll elm]
             (some #(= % elm) coll))]
     (let [all-optional?            (empty? selection)
@@ -147,9 +149,9 @@
                          {::m/walk-schema-refs true ::m/walk-refs true})]
       (when verify-selection?
         (let [invalid-selection-paths (remove @!seen selection-paths)]
-          (assert (empty? invalid-selection-paths)
-                  (str "Selection contains unknown paths: " (prn-str invalid-selection-paths)
-                       "\nAvailable: \n" (with-out-str (pprint (sort (selectable-paths schema))))))))
+          (when (seq invalid-selection-paths)
+            (-fail! ::unknown-paths {:paths     invalid-selection-paths
+                                     :available (sort-by pr-str (selectable-paths schema))}))))
 
       walked)))
 
@@ -167,7 +169,7 @@
   - `[{:friends [:name]} {:friends [:age]}]` - only require `:age` of friends if `:friends` provided (last selection wins).
 
   `options`:
-  - `verify-selection` (`:assert` (default), `:skip`, `false`, `nil`) - what to do when `selection` contains paths not in `schema`.
+  - `verify-selection` (`:throw` (default, `:assert` works as well), `:skip`, `false`, `nil`) - what to do when `selection` contains paths not in `schema`. Throws an `ExceptionInfo` with `{:type ::unknown-paths :data {:paths ... :available ...}}` as `ex-data`.
   - `prune-optionals` (`false` (default), `true`) - whether all fully optional subtrees should be removed from the resulting schema. Alternatively via metadata of selection: `^:only [:name]` (flag takes precedence over metadata).
     Typically used when the selected schema is used for data generation.
 
@@ -179,7 +181,7 @@
   (select Person [:name :handle])   ;; Require specific root attributes.
   (select Person [{:address ['*]}]) ;; Require the full address if provided.
 
-  (select Person [:foo]) ;; Assert exception about non existing path, showing all possible paths.
+  (select Person [:foo]) ;; Throws ExceptionInfo about non existing path, ex-data contains all possible paths.
   ```
   "
   ([schema]
@@ -188,7 +190,7 @@
    (select schema selection nil))
   ([schema selection {:as   options
                       :keys [verify-selection prune-optionals]
-                      :or   {verify-selection :assert}}]
+                      :or   {verify-selection :throw}}]
    (-select schema selection (assoc options
                                     :verify-selection verify-selection
                                     :prune-optionals prune-optionals))))

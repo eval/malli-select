@@ -192,8 +192,14 @@
                                          {:that {:other "?"}}
                                          ":other can be a string as it should no longer be part of the schema"))))
     (testing "verify-selection"
-      (is (thrown-with-msg? AssertionError #"unknown paths: \(\[:a\]\)"
-                            (select int? [:a])))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (select int? [:a])))
+      (let [ex-data (try
+                      (select [:map [:name string?]] [:a])
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= ::sut/unknown-paths (:type ex-data)))
+        (is (= '([:a]) (:paths (:data ex-data))))
+        (is (= '([:name]) (:available (:data ex-data)))))
       (testing "disabling it"
         (is (some? (select int? [:a] {:verify-selection :skip})))
         (is (some? (select int? [:a] {:verify-selection nil})))))))
