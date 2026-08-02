@@ -33,3 +33,4 @@
 
 /tmp/*
 !/tmp/.keep
+/plans
