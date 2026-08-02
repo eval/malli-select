@@ -1,38 +1,45 @@
 {:paths ["src"]
- :deps  {org.clojure/clojure {:mvn/version "1.11.1" :scope "provided"}
-         metosin/malli       {:mvn/version "0.13.0" :scope "provided"}}
+ :deps  {org.clojure/clojure {:mvn/version "1.12.0" :scope "provided"}
+         metosin/malli       {:mvn/version "0.20.1" :scope "provided"}}
  :aliases
- {:dev  {:extra-deps {metosin/malli                            {:mvn/version "0.8.9"}
-                      criterium/criterium                      {:mvn/version "0.4.6"}
-                      com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.5"}}}
+ {:dev  {:extra-deps {criterium/criterium                      {:mvn/version "0.4.6"}
+                      com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.8.0"}}}
   :neil {:project {:name malli-select/malli-select}}
 
-  :malli-0.9
-  {:override-deps {metosin/malli {:mvn/version "0.9.2"}}}
+  :malli-0.13
+  {:override-deps {metosin/malli {:mvn/version "0.13.0"}}}
 
-  :malli-0.10
-  {:override-deps {metosin/malli {:mvn/version "0.10.4"}}}
+  :malli-0.14
+  {:override-deps {metosin/malli {:mvn/version "0.14.0"}}}
 
-  :malli-0.11
-  {:override-deps {metosin/malli {:mvn/version "0.11.0"}}}
+  :malli-0.15
+  {:override-deps {metosin/malli {:mvn/version "0.15.0"}}}
 
-  :malli-0.12
-  {:override-deps {metosin/malli {:mvn/version "0.12.0"}}}
+  :malli-0.16
+  {:override-deps {metosin/malli {:mvn/version "0.16.4"}}}
+
+  :malli-0.17
+  {:override-deps {metosin/malli {:mvn/version "0.17.0"}}}
+
+  :malli-0.18
+  {:override-deps {metosin/malli {:mvn/version "0.18.0"}}}
+
+  :malli-0.19
+  {:override-deps {metosin/malli {:mvn/version "0.19.2"}}}
 
   :test ;; added by neil
   {:extra-paths ["test"]
-   :extra-deps  {metosin/malli                        {:mvn/version "0.8.9"}
-                 io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :extra-deps  {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
    :exec-fn     cognitect.test-runner.api/test}
   :perf  {#_#_:extra-paths ["perf"]
           :extra-deps      {criterium/criterium                      {:mvn/version "0.4.6"}
-                            org.clojure/clojure                      {:mvn/version "1.11.1"}
-                            com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.5"}}
+                            org.clojure/clojure                      {:mvn/version "1.12.0"}
+                            com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.8.0"}}
           :jvm-opts        ["-server"
                             "-Xmx4096m"
                             "-Dclojure.compiler.direct-linking=true"
                             "-Djdk.attach.allowAttachSelf"]}
   :build {:deps       {io.github.clojure/tools.build
-                       {:mvn/version "0.9.6"}
-                       slipset/deps-deploy {:mvn/version "0.2.1"}}
+                       {:mvn/version "0.10.14"}
+                       slipset/deps-deploy {:mvn/version "0.2.5"}}
           :ns-default build}}}

@@ -156,9 +156,13 @@
                                              v
                                              (not s)))]
     (if deploy?
-      (dd/deploy {:installer :remote
-                  :artifact  (b/resolve-path jar-file)
-                  :pom-file  pom-file})
+      (do
+        ;; guards against the write-pom patch (top of this file) silently losing effect
+        (when-not (re-find #"<scope>provided</scope>" (slurp pom-file))
+          (throw (ex-info "No provided-scoped dependency in pom.xml" {:pom-file pom-file})))
+        (dd/deploy {:installer :remote
+                    :artifact  (b/resolve-path jar-file)
+                    :pom-file  pom-file}))
       (println (str \newline "Skipping deploy of version " version " given only-jar-release-type " only-jar-version-type)))
     opts))
 
