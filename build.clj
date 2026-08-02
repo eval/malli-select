@@ -93,7 +93,7 @@
             [:url "https://github.com/eval/malli-select"]
             [:connection "scm:git:https://github.com/eval/malli-select.git"]
             [:developerConnection "scm:git:ssh:git@github.com:eval/malli-select.git"]]
-     (= :exact version-type) (conj [:tag (str "v" version)]))])
+     (#{:exact :pre} version-type) (conj [:tag (str "v" version)]))])
 
 
 (defn- jar-opts [{:keys [version version-type] :as opts}]
@@ -111,16 +111,11 @@
   e.g. `v1.2.3`, `v1.2.3-pre.1` or `v1.2.3-1-g<sha>`.
   Yields map with `version` and `type`."
   [git-version]
-  (let [type          (condp re-find git-version
-                        #"^v\d+\.\d+\.\d+$"         :exact
-                        #"^v\d+\.\d+\.\d+-pre\.\d+" :pre  ;; pre-tag and any commit after
-                        :build)
-        exact-version (second (re-find #"v(\d+\.\d+\.\d+)" git-version))
-        version       (case type
-                        :exact exact-version
-                        :pre   (str exact-version "-SNAPSHOT")
-                        :build (subs git-version 1))]
-    {:version version :version-type type}))
+  (let [type (condp re-find git-version
+               #"^v\d+\.\d+\.\d+$"          :exact
+               #"^v\d+\.\d+\.\d+-pre\.\d+$" :pre
+               :build)]
+    {:version (subs git-version 1) :version-type type}))
 
 (comment
   (git-version->version&type "v1.2.3-123")
@@ -161,20 +156,20 @@
 (defn
   ^#:fika{:option.only-jar-version-type
           {:name "deploy/only-jar-version-type"
-           :desc "Deploy the built jar based on the type of version it has. One of :full (default, e.g. \"1.2.3\"), :full-and-snapshot (also jar-versions like \"1.2.3-SNAPSHOT\"), :all (any jar that was built)."}}
+           :desc "Deploy the built jar based on the type of version it has. One of :full (default, e.g. \"1.2.3\"), :full-and-pre (also prerelease versions like \"1.2.3-pre.1\"), :all (any jar that was built)."}}
   deploy
   "Deploy the built jar."
   [{:deploy/keys [only-jar-version-type] :or {only-jar-version-type :full} :as opts}]
-  {:pre [(#{:full-and-snapshot :full :all} only-jar-version-type)]}
+  {:pre [(#{:full-and-pre :full :all} only-jar-version-type)]}
   (let [{:keys [jar-file] :as opts} (jar-opts opts)
         pom-file                    (b/pom-path (select-keys opts [:lib :class-dir]))
         version                     (pom-path->version pom-file)
-        [v s]                       (re-find #"^\d+\.\d+\.\d+(-SNAPSHOT)?$" version)
+        [v pre]                     (re-find #"^\d+\.\d+\.\d+(-pre\.\d+)?$" version)
         deploy?                     (or (= :all only-jar-version-type)
-                                        (and (= :full-and-snapshot only-jar-version-type) v)
+                                        (and (= :full-and-pre only-jar-version-type) v)
                                         (and (= :full only-jar-version-type)
                                              v
-                                             (not s)))]
+                                             (not pre)))]
     (if deploy?
       (do
         ;; guards against the write-pom patch (top of this file) silently losing effect
