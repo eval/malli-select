@@ -8,12 +8,15 @@ It's based on Rich Hickey's ideas from his talk ["Maybe Not"](https://youtu.be/Y
 
 ## Quickstart
 
-Try it out using [deps-try](https://github.com/eval/deps-try/blob/master/README.md#installation):
+Follow along using [deps-try](https://github.com/eval/deps-try/blob/master/README.md#installation):
 
 ``` clojure
 $ deps-try io.github.eval/malli-select metosin/malli
+# no install/docker
+$ docker run -it --rm -v deps-try:/home/deps-try-user ghcr.io/eval/deps-try io.github.eval/malli-select metosin/malli
 
-user=> (require '[malli-select.core :as ms])
+user=> (require '[malli-select.core :as ms]
+                '[malli.core :as m :refer [form] :rename {form p}])
 user=> (def Person
          [:map
            [:name string?]
@@ -22,7 +25,7 @@ user=> (def Person
                                   [:street string?] [:zip string?]]]]])
 
 ;; require :name, everything else is optional
-user=> (ms/select Person [:name])
+user=> (p (ms/select Person [:name]))
 [:map
  [:name string?]
  [:age {:optional true} pos-int?]
@@ -34,7 +37,7 @@ user=> (ms/select Person [:name])
     [:country {:optional true} string?]]]]]
 
 ;; *if* any address is provided, it should at least have :street
-user=> (ms/select Person [{:addresses [:street]}])
+user=> (p (ms/select Person [{:addresses [:street]}]))
 [:map
  [:name {:optional true} string?]
  [:age {:optional true} pos-int?]
@@ -50,18 +53,18 @@ user=> (ms/select Person [{:addresses [:street]}])
 ;; {:addresses nil}, {:addresses [{}]}, {:addresses [{:street "Foo" :country :se}]}
 
 ;; any address provided should be a full address
-user=> (ms/select Person [{:addresses ['*]}])
+user=> (p (ms/select Person [{:addresses ['*]}]))
 ;;
 ;; require all attributes of a person (shallow, i.e. address attributes become optional)
-user=> (ms/select Person ['*])
+user=> (p (ms/select Person ['*]))
 ;; example valid data:
 ;; {:name "Foo" :age 18 :addresses [{}]}
 
 
 ;; remove any optional attribute
-user=> (ms/select Person [{:addresses ['*]}] {:prune-optionals true})
+user=> (p (ms/select Person [{:addresses ['*]}] {:prune-optionals true}))
 ;; or shorter:
-user=> (ms/select Person ^:only [{:addresses ['*]}])
+user=> (p (ms/select Person ^:only [{:addresses ['*]}]))
 ;; example valid data:
 ;; {:name :not-a-string}
 ;;
