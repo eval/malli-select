@@ -34,7 +34,7 @@ user=> (p (ms/select Person [:name]))
   [:vector
    [:map
     [:street {:optional true} string?]
-    [:country {:optional true} string?]]]]]
+    [:zip {:optional true} string?]]]]]
 
 ;; *if* any address is provided, it should at least have :street
 user=> (p (ms/select Person [{:addresses [:street]}]))
@@ -44,13 +44,13 @@ user=> (p (ms/select Person [{:addresses [:street]}]))
  [:addresses
   {:optional true}
   [:vector
-   [:map [:street string?] [:country {:optional true} string?]]]]]
+   [:map [:street string?] [:zip {:optional true} string?]]]]]
 
 ;; example valid data:
 ;; {}, {:addresses []}, {:addresses [{:street "Main"}]}
 ;;
 ;; example invalid data:
-;; {:addresses nil}, {:addresses [{}]}, {:addresses [{:street "Foo" :country :se}]}
+;; {:addresses nil}, {:addresses [{}]}, {:addresses [{:street "Foo" :zip 1234}]}
 
 ;; any address provided should be a full address
 user=> (p (ms/select Person [{:addresses ['*]}]))
