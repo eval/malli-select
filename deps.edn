@@ -1,9 +1,9 @@
 {:paths ["src"]
- :deps  {org.clojure/clojure {:mvn/version "1.11.1" :scope "provided"}
+ :deps  {org.clojure/clojure {:mvn/version "1.12.0" :scope "provided"}
          metosin/malli       {:mvn/version "0.20.1" :scope "provided"}}
  :aliases
  {:dev  {:extra-deps {criterium/criterium                      {:mvn/version "0.4.6"}
-                      com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.5"}}}
+                      com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.8.0"}}}
   :neil {:project {:name malli-select/malli-select}}
 
   :malli-0.13
@@ -33,13 +33,13 @@
    :exec-fn     cognitect.test-runner.api/test}
   :perf  {#_#_:extra-paths ["perf"]
           :extra-deps      {criterium/criterium                      {:mvn/version "0.4.6"}
-                            org.clojure/clojure                      {:mvn/version "1.11.1"}
-                            com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.0.5"}}
+                            org.clojure/clojure                      {:mvn/version "1.12.0"}
+                            com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.8.0"}}
           :jvm-opts        ["-server"
                             "-Xmx4096m"
                             "-Dclojure.compiler.direct-linking=true"
                             "-Djdk.attach.allowAttachSelf"]}
   :build {:deps       {io.github.clojure/tools.build
-                       {:mvn/version "0.9.6"}
-                       slipset/deps-deploy {:mvn/version "0.2.1"}}
+                       {:mvn/version "0.10.14"}
+                       slipset/deps-deploy {:mvn/version "0.2.5"}}
           :ns-default build}}}
