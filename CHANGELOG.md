@@ -6,6 +6,10 @@
 
 - ClojureScript support: the library is now `.cljc` and tested on Node
   (`clojure -M:cljs-test`) as well as the JVM.
+- `:verify-selection` accepts two new values besides `:throw`/`:assert` and
+  the `:skip`/`nil`/`false` opt-outs: `:log` (print a warning — stderr on
+  Clojure, `console.warn` on ClojureScript — and continue) and a function
+  (called with `{:paths ... :available ...}`, selection continues).
 
 ### Breaking
 

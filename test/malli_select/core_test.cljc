@@ -204,6 +204,17 @@
         (is (= ::sut/unknown-paths (:type ex-data)))
         (is (= '([:a]) (:paths (:data ex-data))))
         (is (= '([:name]) (:available (:data ex-data)))))
+      (testing ":log logs instead of throwing"
+        (is (some? #?(:clj  (binding [*err* (java.io.StringWriter.)]
+                              (select int? [:a] {:verify-selection :log}))
+                      :cljs (select int? [:a] {:verify-selection :log})))))
+      (testing "a function receives the report"
+        (let [!report (atom nil)
+              result  (select [:map [:name string?]] [:a]
+                              {:verify-selection (partial reset! !report)})]
+          (is (some? result))
+          (is (= '([:a]) (:paths @!report)))
+          (is (= '([:name]) (:available @!report)))))
       (testing "disabling it"
         (is (some? (select int? [:a] {:verify-selection :skip})))
         (is (some? (select int? [:a] {:verify-selection nil})))))))

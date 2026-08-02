@@ -88,6 +88,12 @@ user=> (ex-data *e)
 user=> (ms/select Person [:a] {:verify-selection false})
 ;; :verify-selection defaults to :throw (`:assert`, the pre-v0.8 spelling, still works);
 ;; :skip, nil and false disable the check.
+
+;; other options: :log warns (stderr/console.warn) and continues...
+user=> (ms/select Person [:a] {:verify-selection :log})
+WARNING: :malli-select.core/unknown-paths {:paths ([:a]), :available (...)}
+;; ...and a function gets the report, e.g.:
+user=> (ms/select Person [:a] {:verify-selection #(log/warn "unknown paths" (:paths %))})
 ```
 
 > [!NOTE]

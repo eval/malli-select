@@ -6,6 +6,11 @@
 (defn- -fail! [type data]
   (throw (ex-info (str type " " (pr-str data)) {:type type :data data})))
 
+(defn- -warn! [type data]
+  (let [msg (str type " " (pr-str data))]
+    #?(:clj  (binding [*out* *err*] (println "WARNING:" msg))
+       :cljs (js/console.warn msg))))
+
 (defn- clean-path [path]
   (loop [p path
          r (transient [])]
@@ -150,8 +155,12 @@
       (when verify-selection?
         (let [invalid-selection-paths (remove @!seen selection-paths)]
           (when (seq invalid-selection-paths)
-            (-fail! ::unknown-paths {:paths     invalid-selection-paths
-                                     :available (sort-by pr-str (selectable-paths schema))}))))
+            (let [report {:paths     invalid-selection-paths
+                          :available (sort-by pr-str (selectable-paths schema))}]
+              (cond
+                (fn? verify-selection)    (verify-selection report)
+                (= :log verify-selection) (-warn! ::unknown-paths report)
+                :else                     (-fail! ::unknown-paths report))))))
 
       walked)))
 
@@ -169,7 +178,11 @@
   - `[{:friends [:name]} {:friends [:age]}]` - only require `:age` of friends if `:friends` provided (last selection wins).
 
   `options`:
-  - `verify-selection` (`:throw` (default, `:assert` works as well), `:skip`, `false`, `nil`) - what to do when `selection` contains paths not in `schema`. Throws an `ExceptionInfo` with `{:type ::unknown-paths :data {:paths ... :available ...}}` as `ex-data`.
+  - `verify-selection` - what to do when `selection` contains paths not in `schema`:
+    - `:throw` (default, `:assert` works as well) - throw an `ExceptionInfo` with `{:type ::unknown-paths :data {:paths ... :available ...}}` as `ex-data`.
+    - `:log` - print a warning (stderr on Clojure, `console.warn` on ClojureScript) and continue.
+    - a function - called with `{:paths ... :available ...}`, result ignored, selection continues.
+    - `:skip`, `false`, `nil` - don't verify.
   - `prune-optionals` (`false` (default), `true`) - whether all fully optional subtrees should be removed from the resulting schema. Alternatively via metadata of selection: `^:only [:name]` (flag takes precedence over metadata).
     Typically used when the selected schema is used for data generation.
 
