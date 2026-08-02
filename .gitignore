@@ -34,3 +34,4 @@
 /tmp/*
 !/tmp/.keep
 /plans
+/cljs-test-runner-out

@@ -1,5 +1,7 @@
 (ns malli-select.core-test
-  #?(:cljs (:require-macros [malli-select.core-test]))
+  #?(:cljs (:require-macros [malli-select.core-test
+                             :refer [expect-selection-to-validate
+                                     expect-selection-to-invalidate]]))
   (:require
    [clojure.pprint :refer [pprint]]
    [clojure.test :as t :refer [deftest is testing]]
@@ -15,25 +17,27 @@
 (defn pps [o]
   (with-out-str (pprint o)))
 
-(defmacro expect-selection-to-validate [sel & data+maybe-reason]
-  `(if ~sel
-     (let [data#       ~(first data+maybe-reason)
-           sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))
-           result#     (or (m/validate sel-schema# data#) (m/explain sel-schema# data#))]
-       (is (true? result#)
-           (cond-> (str "Expected data:\n" (pps data#) "to be valid given schema:\n" (pps (m/form sel-schema#)))
-             ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason))
-             :always                     (str "\nvalidate errors:\n" (pps (:errors result#))))))
-     *schema*))
+#?(:clj
+   (defmacro expect-selection-to-validate [sel & data+maybe-reason]
+     `(if ~sel
+        (let [data#       ~(first data+maybe-reason)
+              sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))
+              result#     (or (m/validate sel-schema# data#) (m/explain sel-schema# data#))]
+          (is (true? result#)
+              (cond-> (str "Expected data:\n" (pps data#) "to be valid given schema:\n" (pps (m/form sel-schema#)))
+                ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason))
+                :always                     (str "\nvalidate errors:\n" (pps (:errors result#))))))
+        *schema*)))
 
-(defmacro expect-selection-to-invalidate [sel & data+maybe-reason]
-  `(if ~sel
-     (let [data#       ~(first data+maybe-reason)
-           sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))]
-       (is (false? (m/validate sel-schema# data#))
-           (cond-> (str "Expected data:\n" (pps data#) "to be *invalid* given schema:\n" (pps (m/form sel-schema#)))
-             ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason)))))
-     *schema*))
+#?(:clj
+   (defmacro expect-selection-to-invalidate [sel & data+maybe-reason]
+     `(if ~sel
+        (let [data#       ~(first data+maybe-reason)
+              sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))]
+          (is (false? (m/validate sel-schema# data#))
+              (cond-> (str "Expected data:\n" (pps data#) "to be *invalid* given schema:\n" (pps (m/form sel-schema#)))
+                ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason)))))
+        *schema*)))
 
 
 (deftest select-test

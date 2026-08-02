@@ -31,6 +31,17 @@
   (update-keys (filter (comp #(= (name ns) %) namespace key) m)
                (comp keyword name)))
 
+(defn- runner-flags
+  "E.g. `(runner-flags \"test\" {:test/H true}) ;;=> {\"-H\" \"true\"}`"
+  [ns opts]
+  (-> (extract-keys-with-ns ns opts)
+      (update-keys (fn [k]
+                     ;; :H => "-H", :help => "--help"
+                     (let [k (name k)]
+                       (cond->> (str "-" k)
+                         (> (count k) 1) (str "-")))))
+      (update-vals str)))
+
 (defn ^#:fika{:examples [":test/d '\"some-dir\"'"
                          ":test/n '\"some.namespace-test\"'"
                          "# see all runner options\n:test/H true"]}
@@ -39,14 +50,7 @@
 
   Passing options to test-runner possible, see examples." [opts]
   #_(prn :opts opts)
-  (let [test-options   (extract-keys-with-ns "test" opts)
-        test-options   (-> test-options
-                           (update-keys (fn [k]
-                                          ;; :H => "-H", :help => "--help"
-                                          (let [k (name k)]
-                                            (cond->> (str "-" k)
-                                              (> (count k) 1) (str "-")))))
-                           (update-vals str))
+  (let [test-options   (runner-flags "test" opts)
         basis          (b/create-basis {:aliases [:test]})
         cmds           (doto (b/java-command
                               {:basis         basis
@@ -56,6 +60,22 @@
                                :main-args     (doto (reduce into ["-m" "cognitect.test-runner"] test-options) prn)}))
         {:keys [exit]} (b/process cmds)]
     (when-not (zero? exit) (throw (ex-info "Tests failed" {}))))
+  opts)
+
+(defn ^#:fika{:examples [":test-cljs/n '\"some.namespace-test\"'"
+                         "# see all runner options\n:test-cljs/H true"]}
+  test-cljs
+  "Run all the tests on ClojureScript (Node).
+
+  Passing options to cljs-test-runner possible, see examples." [opts]
+  (let [test-options   (runner-flags "test-cljs" opts)
+        basis          (b/create-basis {:aliases [:cljs-test]})
+        cmds           (b/java-command
+                        {:basis     basis
+                         :main      'clojure.main
+                         :main-args (reduce into ["-m" "cljs-test-runner.main"] test-options)})
+        {:keys [exit]} (b/process cmds)]
+    (when-not (zero? exit) (throw (ex-info "CLJS tests failed" {}))))
   opts)
 
 (b/java-command {:basis (b/create-basis {:aliases [:test]}) :main 'clojure.main})
@@ -171,14 +191,14 @@
                          ":build/git-version $(printf '\"%s\"'  $(git describe --tags))"
                          ":build/git-version '\"v1.2.3\"' :deploy/only-jar-version-type :full-and-snapshot"]
 
-              :options.from-commands            '[test build deploy]}
+              :options.from-commands            '[test test-cljs build deploy]}
   release
   "Test, build and deploy.
 
 Deploys *only* when name of the jar built has the right format, see option `deploy/only-jar-version-type`."
   [opts]
   #_(prn :release-opts opts)
-  (deploy (build (test opts))))
+  (deploy (build (test-cljs (test opts)))))
 
 (comment
   
