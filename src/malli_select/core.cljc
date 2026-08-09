@@ -389,7 +389,7 @@
     - `:log` - print a warning (stderr on Clojure, `console.warn` on ClojureScript) and continue.
     - a function - called with `{:paths ... :available ...}`, result ignored, selection continues.
     - `:skip`, `false`, `nil` - don't verify.
-  - `prune-optionals` (`false` (default), `true`) - whether all fully optional subtrees should be removed from the resulting schema. Alternatively via metadata of selection: `^:only [:name]` (flag takes precedence over metadata).
+  - `prune-optionals` (`false` (default), `true`) - whether all fully optional subtrees should be removed from the resulting schema. Alternatively via metadata of selection: `^:only [:name]` (flag takes precedence over metadata). See also `select-only`, which forces this option.
     Typically used when the selected schema is used for data generation.
 
   Examples:
@@ -415,6 +415,23 @@
                                     :prune-optionals prune-optionals))))
 
 
+(defn select-only
+  "Like `select`, but the result contains only the selected attributes:
+  `:prune-optionals` is forced to `true` (a caller-supplied
+  `:prune-optionals false` is overridden). All other options (e.g.
+  `:verify-selection`) pass through unchanged.
+
+  Typically used to generate specific data:
+  ```
+  (mg/generate (select-only Person [:name])) ;; => {:name \"...\"}
+  ```
+  For `:multi` schemas, branches the selection does not mention are dropped."
+  ([schema selection]
+   (select-only schema selection nil))
+  ([schema selection options]
+   (select schema selection (assoc options :prune-optionals true))))
+
+
 (defn selector
   "Yields a function similar to `(partial ms/select schema)`.
   A selector is faster when doing multiple selections from a schema as the schema is optionalized once.
@@ -422,7 +439,7 @@
   Examples:
   ```
   (let [person-selector (selector Person)]
-    (person-selector ^:only [:name]))
+    (person-selector [:name] {:prune-optionals true})) ;; what `select-only` does
   ```
   "
   [schema]

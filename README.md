@@ -62,16 +62,16 @@ user=> (p (ms/select Person ['*]))
 
 
 ;; remove any optional attribute
-user=> (p (ms/select Person [{:addresses ['*]}] {:prune-optionals true}))
-;; or shorter:
-user=> (p (ms/select Person ^:only [{:addresses ['*]}]))
+user=> (p (ms/select-only Person [{:addresses ['*]}]))
 ;; example valid data:
 ;; {:name :not-a-string}
 ;;
 ;; Typically you'd use this to generate only specific data:
 user=> (require '[malli.generator :as mg])
-user=> (mg/generate (ms/select Person ^:only [:name]))
+user=> (mg/generate (ms/select-only Person [:name]))
 {:name "sNeLdUI5KtPw"}
+;; also supported: (ms/select Person [:name] {:prune-optionals true})
+;; and, via metadata: (ms/select Person ^:only [:name])
 
 ;; selecting something not contained in the schema:
 user=> (ms/select Person [:a])
@@ -150,9 +150,9 @@ user=> (def Person [:map [:id :int] [:pet [:multi {:dispatch :kind}
                                             [:cat [:map [:kind :keyword] [:lives :int]]]]]])
 user=> (p (ms/select Person [:id {:pet {:dog [:breed]}}]))
 
-;; pruning drops unmentioned branches (mentioning none keeps all),
+;; select-only drops unmentioned branches (mentioning none keeps all),
 ;; e.g. to generate only humans:
-user=> (mg/generate (ms/select Animal ^:only {:human [:name]}))
+user=> (mg/generate (ms/select-only Animal {:human [:name]}))
 {:name "x2Ep", :type :human}
 ```
 

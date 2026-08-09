@@ -5,8 +5,9 @@
   (:require
    [clojure.pprint :refer [pprint]]
    [clojure.test :as t :refer [deftest is testing]]
-   [malli-select.core :as sut :refer [select selector]]
-   [malli.core :as m]))
+   [malli-select.core :as sut :refer [select select-only selector]]
+   [malli.core :as m]
+   [malli.generator :as mg]))
 
 (defonce ^:private ^:dynamic
   *schema* nil)
@@ -370,6 +371,41 @@
       (expect-selection-to-validate   ^:only {:human [:name]} {:type :human :name "x"})
       (expect-selection-to-invalidate ^:only {:human [:name]} {:type :sized :size 1}
                                       ":sized-branch is dropped"))))
+
+(deftest select-only-test
+  (let [Person [:map
+                [:name :string]
+                [:age :int]
+                [:addresses [:vector [:map [:street :string] [:zip :int]]]]]]
+    (testing "same result as select with pruning"
+      (is (= (m/form (select Person [:name] {:prune-optionals true}))
+             (m/form (select-only Person [:name]))))
+      (is (= (m/form (select Person ^:only [:name]))
+             (m/form (select-only Person [:name])))))
+
+    (testing ":prune-optionals is forced"
+      (is (= (m/form (select-only Person [:name]))
+             (m/form (select-only Person [:name] {:prune-optionals false})))))
+
+    (testing "other options pass through"
+      (let [ex-data (try
+                      (select-only Person [:nope])
+                      (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+        (is (= ::sut/unknown-paths (:type ex-data))))
+      (is (some? (select-only Person [:nope] {:verify-selection false}))))
+
+    (testing "multi: unmentioned branches are dropped"
+      ;; the pruned dispatch key gets re-appended, hence :name before :type
+      (is (= [:multi {:dispatch :type}
+              [:human [:map [:name :string] [:type :keyword]]]]
+             (m/form (select-only [:multi {:dispatch :type}
+                                   [:human [:map [:type :keyword] [:name :string] [:age :int]]]
+                                   [:sized [:map [:type :keyword] [:size :int]]]]
+                                  {:human [:name]})))))
+
+    (testing "generated samples validate against the pruned schema"
+      (let [s (select-only Person [:name {:addresses [:street]}])]
+        (is (every? (partial m/validate s) (mg/sample s)))))))
 
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})

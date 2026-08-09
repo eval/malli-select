@@ -29,13 +29,15 @@
 
   :test ;; added by neil
   {:extra-paths ["test"]
-   :extra-deps  {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :extra-deps  {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}
+                 org.clojure/test.check               {:mvn/version "1.1.1"}}
    :exec-fn     cognitect.test-runner.api/test}
 
   :cljs-test ;; run tests on Node: clojure -M:cljs-test
   {:extra-paths ["test"]
    :extra-deps  {org.clojure/clojurescript {:mvn/version "1.12.42"}
-                 olical/cljs-test-runner   {:mvn/version "3.8.1"}}
+                 olical/cljs-test-runner   {:mvn/version "3.8.1"}
+                 org.clojure/test.check    {:mvn/version "1.1.1"}}
    :main-opts   ["-m" "cljs-test-runner.main"]}
   :perf  {#_#_:extra-paths ["perf"]
           :extra-deps      {criterium/criterium                      {:mvn/version "0.4.6"}

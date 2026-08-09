@@ -4,6 +4,9 @@
 
 ### Added
 
+- `select-only`: explicit alternative to `^:only` metadata /
+  `{:prune-optionals true}`; forces pruning (also when the caller passes
+  `:prune-optionals false`).
 - `:multi` schema support: branches are selected with a *map*-selection —
   keys are dispatch values, values are sub-selections. `{:human [:name]}`
   requires `:name` in branch `:human`; unmentioned branches become
