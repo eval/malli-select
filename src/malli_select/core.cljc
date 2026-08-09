@@ -1,6 +1,7 @@
 (ns malli-select.core
   "Select a subset of a malli schema."
-  (:require [malli.core :as m]
+  (:require [clojure.set :as set]
+            [malli.core :as m]
             [malli.util :as mu]))
 
 (def ^:dynamic *verify-selection*
@@ -29,14 +30,62 @@
                           r
                           (conj! r phead)))))))
 
+(defn- branch-seg?
+  "Is `x` a path segment addressing a branch of a `:multi`?"
+  [x]
+  (and (map? x) (contains? x :branch)))
 
-(defn- map-schema-path-walker [f]
+(defn- untag-path
+  "Strip `{:branch k}` tags from `path`."
+  [path]
+  (mapv #(if (branch-seg? %) (:branch %) %) path))
+
+(defn- tag-path
+  "Tag every segment of cleaned `path` that crosses a `:multi` (per
+  `multi-paths`) as `{:branch seg}`."
+  [multi-paths path]
+  (if (empty? multi-paths)
+    path
+    (loop [prefix [] tagged [] [seg & more :as segs] (seq path)]
+      (if-not segs
+        tagged
+        (recur (conj prefix seg)
+               (conj tagged (if (contains? multi-paths prefix) {:branch seg} seg))
+               more)))))
+
+(defn- multi-branch-keys
+  "Map of cleaned path → set of branch keys, for every `:multi` in `schema`."
+  [schema]
+  (let [!acc (atom {})]
+    (m/walk schema
+            (fn [s path _ _]
+              (when (= :multi (m/type s))
+                (swap! !acc assoc (clean-path path) (into #{} (map first) (m/children s))))
+              s)
+            {::m/walk-schema-refs true ::m/walk-refs true})
+    @!acc))
+
+(defn- schema-path-walker
+  "Walker that fires `map-f` at `:map` nodes and `multi-f` at `:multi` nodes.
+  `multi-f` also receives the original (pre-walk) schema."
+  [map-f multi-f]
   (fn [schema path children _]
-    (let [schema      (m/-set-children schema children)
-          map-schema? (= :map (m/type schema))]
-      (cond-> schema
-        map-schema? (f path)))))
+    (let [walked (m/-set-children schema children)]
+      (case (m/type schema)
+        :map   (map-f walked path)
+        :multi (multi-f walked schema path)
+        walked))))
 
+
+(defn- merge-selections
+  "Merge two sub-selections for the same key: vectors concatenate, branch-maps
+  merge per branch. On a shape mismatch the last one wins (verification then
+  reports the wrong-shaped one)."
+  [a b]
+  (cond
+    (and (map? a) (map? b))               (merge-with merge-selections a b)
+    (and (sequential? a) (sequential? b)) (into (vec a) b)
+    :else                                 b))
 
 (defn- sel->map
   "Turns `[:a {:b [:c]} {:b [:d]} :e]`
@@ -45,7 +94,7 @@
   (persistent! (reduce (fn [acc i]
                          (if (map? i)
                            (reduce-kv (fn [acc k v]
-                                        (assoc! acc k (into (get acc k []) v))) acc i)
+                                        (assoc! acc k (merge-selections (get acc k []) v))) acc i)
                            (assoc! acc nil (conj (get acc nil) i)))) (transient {}) sel)))
 
 
@@ -55,18 +104,51 @@
   (parse-selection []) ;; => [['?]]
   (parse-selection [:name]) ;; => [[:name]]
   (parse-selection [:name {:address [:street]}]) ;; => [[:name] [:address :street]]
+  (parse-selection {:human [:name]}) ;; => [[{:branch :human} :name]]
   ```
-  "
+  A selection that *is* a map addresses branches of a `:multi`: keys are
+  dispatch values (`'*` for every branch), values are sub-selections."
   ([sel] (parse-selection sel []))
   ([sel path]
-   (if-not (seq sel)
+   (cond
+     (not (seq sel))
      [(conj path '?)]
+
+     (map? sel)
+     (persistent!
+      (reduce-kv (fn [acc k v]
+                   (reduce conj! acc (parse-selection v (conj path {:branch k}))))
+                 (transient []) sel))
+
+     :else
      (let [sel-map (sel->map sel)]
        (persistent!
         (reduce-kv (fn [acc k v]
                      (if (nil? k)
                        (reduce conj! acc (map #(conj path %) v))
                        (reduce conj! acc (parse-selection v (conj path k))))) (transient []) sel-map))))))
+(comment
+  (sel->map {'* []})
+  (parse-selection {'* []})
+  (select [:vector [:multi {:dispatch :type} [:foo [:map [:f :string]]] [::m/default [:map [:d :string]]]]] {::m/default [:d]})
+  #_:end)
+
+(defn- expand-star-branches
+  "Expand every `{:branch '*}` segment of `path` into one path per branch of
+  the `:multi` at that position. Positions without a known `:multi` keep the
+  star segment (so verification reports it)."
+  [multi-paths path]
+  (loop [expanded [[]] [seg & more :as segs] (seq path)]
+    (if-not segs
+      expanded
+      (recur (if (= {:branch '*} seg)
+               (vec (mapcat (fn [p]
+                              (if-let [ks (seq (get multi-paths (untag-path p)))]
+                                (map #(conj p {:branch %}) ks)
+                                [(conj p seg)]))
+                            expanded))
+               (mapv #(conj % seg) expanded))
+             more))))
 
 
 (defn- paths->tree [paths]
@@ -76,7 +158,8 @@
 
 
 (defn selectable-paths
-  "Yield set of selectable paths.
+  "Yield set of selectable paths. Branches of a `:multi` show up as
+  `{:branch dispatch-value}` segments.
 
   Examples:
   ```
@@ -89,16 +172,51 @@
   ```
   "
   [schema]
-  (->> schema
-       mu/subschemas
-       (map (comp clean-path :path))
-       (filter seq)
-       set))
+  (let [subs   (mu/subschemas schema)
+        multis (into {}
+                     (keep (fn [{s :schema p :path}]
+                             (when (= :multi (m/type s))
+                               [(clean-path p) (into #{} (map first) (m/children s))])))
+                     subs)]
+    (->> subs
+         (map (comp #(tag-path multis %) clean-path :path))
+         (filter seq)
+         set)))
+
+
+(defn- star-available
+  "For every failing `'*`-branch selection in `origin-paths`: the attribute
+  paths available in *all* branches of the `:multi` at that position, spelled
+  as `{:branch '*}` paths."
+  [multi-paths available origin-paths]
+  (for [p     origin-paths
+        :let  [idx (first (keep-indexed (fn [i seg] (when (= {:branch '*} seg) i)) p))]
+        :when idx
+        :let  [prefix     (subvec (vec p) 0 idx)
+               branch-ks  (get multi-paths (untag-path prefix))
+               per-branch (map (fn [k]
+                                 (let [bp (conj prefix {:branch k})]
+                                   (into #{} (keep #(when (and (seq %) (= bp (pop %))) (peek %))) available)))
+                               branch-ks)
+               common     (if (seq per-branch) (apply set/intersection per-branch) #{})]
+        attr  common]
+    (conj prefix {:branch '*} attr)))
+
+(defn- shape-mismatch?
+  "True when `path` addresses a `:multi` position without a `{:branch _}`
+  segment, or a non-multi position with one."
+  [multi-paths path]
+  (boolean
+   (loop [prefix [] [seg & more :as segs] (seq path)]
+     (when segs
+       (if (= (contains? multi-paths (untag-path prefix)) (branch-seg? seg))
+         (recur (conj prefix seg) more)
+         true)))))
 
 
 (defn- -select
   [schema selection
-   {:as   _options
+   {:as   options
     ::keys [optionalized]
     :keys [verify-selection prune-optionals]
     :or
@@ -111,7 +229,15 @@
           prune-optionals          (if (not (nil? prune-optionals))
                                      prune-optionals
                                      (-> selection meta :only))
-          selection-paths          (parse-selection selection)
+          multi-paths              (when-not all-optional?
+                                     (or (::multi-paths options) (multi-branch-keys schema)))
+          expanded->origin         (into {}
+                                         (mapcat (fn [p]
+                                                   (if (some #{{:branch '*}} p)
+                                                     (map #(vector % p) (expand-star-branches multi-paths p))
+                                                     [[p p]])))
+                                         (parse-selection selection))
+          selection-paths          (keys expanded->origin)
           sel-map                  (paths->tree selection-paths)
           !available-paths         (atom #{})
           !seen                    (atom #{})
@@ -133,7 +259,7 @@
           walker (let [optionalize-step (fn optionalize-step [v]
                                           (update v 0 mu/optional-keys))
                        require-step     (fn require-step [[schema path :as v]]
-                                          (let [cleaned-path (clean-path path)
+                                          (let [cleaned-path (tag-path multi-paths (clean-path path))
                                                 to-require   (sel-map cleaned-path)]
                                             (if-not (seq to-require)
                                               v
@@ -157,15 +283,75 @@
                                      (not optionalized)  (wrap optionalize-step)
                                      (not all-optional?) (wrap require-step)
                                      prune-optionals     (wrap prune-step)
-                                     :finally            (wrap first))]
-                   (map-schema-path-walker (comp middlewares vector)))
+                                     :finally            (wrap first))
+
+                       ;; a `'?` selection at a :multi ({:pet {}}, [{:pet []}]) mentions
+                       ;; the multi: mark it seen and protect it from pruning.
+                       mention-step (fn mention-step [schema path]
+                                      (when-not all-optional?
+                                        (let [cleaned    (tag-path multi-paths (clean-path path))
+                                              to-require (sel-map cleaned)]
+                                          (when (and to-require (to-require '?))
+                                            (when verify-selection?
+                                              (swap! !seen conj (conj cleaned '?)))
+                                            (record-prune-exclusions! path))))
+                                      schema)
+                       multi-prune-step (fn multi-prune-step [schema path]
+                                          (let [children  (m/children schema)
+                                                mentioned (filterv #(contains? @!prune-exclusions (conj path (first %)))
+                                                                   children)]
+                                            (if (seq mentioned)
+                                              (m/into-schema (m/type schema) (m/-properties schema)
+                                                             mentioned (m/-options schema))
+                                              schema)))
+                       ;; a keyword :dispatch key must stay required in every explicit
+                       ;; map-branch - an "optional" dispatch key is a lie in the form.
+                       ;; `::m/default` and nil branches also match on an *absent*
+                       ;; dispatch key, so they are left alone.
+                       dispatch-require-step
+                       (fn dispatch-require-step [schema original]
+                         (let [dispatch (:dispatch (m/properties schema))]
+                           (if-not (keyword? dispatch)
+                             schema
+                             (let [orig-entry (fn [dv]
+                                                (some (fn [[dv' _ branch]]
+                                                        (when (= dv' dv)
+                                                          (some (fn [[k p s]] (when (= k dispatch) [p s]))
+                                                                (when (= :map (m/type branch)) (m/children branch)))))
+                                                      (m/children original)))
+                                   fix-child  (fn [[dv props branch :as child]]
+                                                (if (or (not= :map (m/type branch))
+                                                        (= ::m/default dv)
+                                                        (nil? dv))
+                                                  child
+                                                  (if (mu/get branch dispatch)
+                                                    [dv props (mu/required-keys branch [dispatch])]
+                                                    (if-let [[eprops eschema] (orig-entry dv)]
+                                                      [dv props (mu/assoc branch [dispatch (not-empty (dissoc eprops :optional))] eschema)]
+                                                      child))))]
+                               (m/into-schema (m/type schema) (m/-properties schema)
+                                              (mapv fix-child (m/children schema)) (m/-options schema))))))
+                       multi-step (fn multi-step [walked original path]
+                                    (-> walked
+                                        (mention-step path)
+                                        (cond-> prune-optionals (multi-prune-step path))
+                                        (dispatch-require-step original)))]
+                   (schema-path-walker (comp middlewares vector) multi-step))
           walked (m/walk schema walker
                          {::m/walk-schema-refs true ::m/walk-refs true})]
       (when verify-selection?
         (let [invalid-selection-paths (remove @!seen selection-paths)]
           (when (seq invalid-selection-paths)
-            (let [report {:paths     invalid-selection-paths
-                          :available (sort-by pr-str (selectable-paths schema))}]
+            (let [origin-paths (distinct (map #(get expanded->origin % %) invalid-selection-paths))
+                  available    (selectable-paths schema)
+                  report       (cond-> {:paths     origin-paths
+                                        :available (sort-by pr-str
+                                                            (into available
+                                                                  (star-available multi-paths available origin-paths)))}
+                                 (some #(shape-mismatch? multi-paths %) origin-paths)
+                                 (assoc :hint (str "a vector selects attributes of a map-schema, "
+                                                   "a map selects branches of a multi-schema, "
+                                                   "e.g. {:some-branch [:name]}")))]
               (cond
                 (fn? verify-selection)    (verify-selection report)
                 (= :log verify-selection) (-warn! ::unknown-paths report)
@@ -185,6 +371,17 @@
   - `[:address {:address [:street]}]` - require `:address` but only its `:street` is required.
   - `[:address {:address [] :friends [:name]}]` - require `:address` and optionally `:friends`.
   - `[{:friends [:name]} {:friends [:age]}]` - require `:name` and `:age` of friends if `:friends` provided (selections merge).
+
+  `:multi` schemas are selected with a *map*: keys are dispatch values, values
+  are sub-selections. Unmentioned branches become all-optional. A keyword
+  `:dispatch` key stays required in every explicit map-branch:
+  - `{:human [:name]}` - require `:name` in branch `:human`.
+  - `{'* [:type]}` - require `:type` in *every* branch (fails verification when a branch lacks it).
+  - `{'* [:type] :human [:name]}` - `'*` merges with explicit branches.
+  - `{::m/default [:x]}` - address the default branch.
+  - `{}` - everything optional (like `[]`).
+  - `[:id {:pet {:dog [:breed]}}]` - nested: `:pet` is a `:multi` with a `:dog` branch.
+  With `prune-optionals`: branches stay when mentioned (or when none is mentioned); other branches are dropped.
 
   `options`:
   - `verify-selection` - what to do when `selection` contains paths not in `schema`. Defaults to `*verify-selection*` (initially `:throw`):
@@ -229,11 +426,13 @@
   ```
   "
   [schema]
-  (let [optionalized-schema (select schema)]
+  (let [optionalized-schema (select schema)
+        multi-paths         (multi-branch-keys optionalized-schema)]
     (fn selector-select
       ([selection] (selector-select selection nil))
       ([selection options]
-       (-select optionalized-schema selection (merge {::optionalized true} options))))))
+       (-select optionalized-schema selection
+                (merge {::optionalized true ::multi-paths multi-paths} options))))))
 
 (comment
   (def Person

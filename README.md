@@ -106,6 +106,62 @@ user=> (alter-var-root #'ms/*verify-selection* (constantly :log)) ;; CLJS: (set!
 See [the tests](./test/malli_select/core_test.cljc) for more.
 
 
+## Multi-schemas
+
+Branches of a `:multi` schema are selected with a *map*: keys are dispatch
+values, values are sub-selections. The selection mirrors the shape of the
+schema — a vector addresses attributes of a `:map`, a map addresses branches
+of a `:multi` — at any nesting depth.
+
+``` clojure
+user=> (def Animal
+         [:multi {:dispatch :type}
+           [:human [:map [:type :keyword] [:name string?] [:age pos-int?]]]
+           [:sized [:map [:type :keyword] [:size pos-int?]]]])
+
+;; require :name in the :human branch; other branches become all-optional
+user=> (p (ms/select Animal {:human [:name]}))
+[:multi {:dispatch :type}
+ [:human [:map [:type :keyword] [:name string?] [:age {:optional true} pos-int?]]]
+ [:sized [:map [:type :keyword] [:size {:optional true} pos-int?]]]]
+
+;; note that :type stays required: a keyword :dispatch key is auto-required in
+;; every explicit map-branch, as data without it won't dispatch anyway.
+;; (`::m/default` and nil branches are left alone - they also match data
+;; *without* a dispatch value.)
+
+;; '* addresses all branches...
+user=> (p (ms/select Animal {'* [:type]}))
+
+;; ...so the sub-selection must be satisfiable in *every* branch:
+user=> (ms/select Animal {'* [:name]})
+Execution error (ExceptionInfo) ...
+;; :available contains what all branches have in common, e.g. [{:branch *} :type]
+
+;; be more precise ('* merges with explicit branches):
+user=> (ms/select Animal {'* [:type] :human [:name]})
+;; ...or skip verification (branches lacking :name are then left as-is):
+user=> (ms/select Animal {'* [:name]} {:verify-selection false})
+
+;; a nested multi (a vector selection addresses map-attributes,
+;; a map selection addresses branches):
+user=> (def Person [:map [:id :int] [:pet [:multi {:dispatch :kind}
+                                            [:dog [:map [:kind :keyword] [:breed string?]]]
+                                            [:cat [:map [:kind :keyword] [:lives :int]]]]]])
+user=> (p (ms/select Person [:id {:pet {:dog [:breed]}}]))
+
+;; pruning drops unmentioned branches (mentioning none keeps all),
+;; e.g. to generate only humans:
+user=> (mg/generate (ms/select Animal ^:only {:human [:name]}))
+{:name "x2Ep", :type :human}
+```
+
+Limitations:
+- Branches that are not `:map` schemas (e.g. `[:multi ... [:str :string]]`) pass through untouched and cannot be selected.
+- Numeric dispatch values `0` and `1` are unsupported (they collide with how paths are cleaned internally).
+- A function-valued `:dispatch` disables the dispatch-key auto-require.
+
+
 ## LICENSE
 
 Copyright (c) 2026 Gert Goet, ThinkCreate.

@@ -246,6 +246,131 @@
                                      {:name "Foo" :age "NaN"}
                                      "All but :name optional")))
 
+(deftest multi-select-test
+  (testing "branch selections"
+    (binding [*schema* [:multi {:dispatch :type}
+                        [:foo [:map [:f :string] [:fo :string]]]
+                        [:bar [:map [:b :string] [:ba :string]]]
+                        [::m/default [:map [:d :string] [:de :string]]]]]
+      (expect-selection-to-validate {}
+                                    {}
+                                    "everything (in default-branch) is optional")
+      (expect-selection-to-validate []
+                                    {}
+                                    "everything (in default-branch) is optional")
+      (expect-selection-to-validate {:foo [:f]}
+                                    {}
+                                    "only the foo-branch has required atts")
+      (expect-selection-to-invalidate {:foo [:f]}
+                                      {:type :foo}
+                                      "foo-branch requires :f")
+      (expect-selection-to-validate {:foo [:f]}
+                                    {:type :foo :f ""}
+                                    "foo-branch requires only f")
+      (expect-selection-to-validate {:foo ['*]}
+                                    {:type :foo :f "" :fo ""}
+                                    "whole foo-branch required")
+      (expect-selection-to-invalidate {:foo ['*]}
+                                      {:type :foo :f ""}
+                                      "whole foo-branch required")
+      (expect-selection-to-invalidate {::m/default [:d]}
+                                      {}
+                                      "default-branch requires :d")
+      (expect-selection-to-validate {::m/default [:d]}
+                                    {:d ""}
+                                    "default-branch requires :d")))
+
+  (testing "dispatch key stays required"
+    (binding [*schema* [:multi {:dispatch :type}
+                        [:human [:map [:type :keyword] [:name :string] [:age :int]]]
+                        [:sized [:map [:type :keyword] [:size :int]]]]]
+      (expect-selection-to-validate   {} {:type :human})
+      (expect-selection-to-invalidate {} {:name "x"}
+                                      "dispatch key :type is auto-required")
+
+      (testing "'* addresses all branches"
+        (expect-selection-to-validate   {'* [:type]} {:type :sized})
+        (expect-selection-to-validate   {'* [:type] :human [:name]}
+                                        {:type :human :name "x"}
+                                        "'* merges with explicit branches")
+        (expect-selection-to-invalidate {'* [:type] :human [:name]}
+                                        {:type :human}
+                                        "'* merges with explicit branches")
+
+        (let [ex-data (try
+                        (select *schema* {'* [:name]})
+                        (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+          (is (= ::sut/unknown-paths (:type ex-data))
+              "'*-selections must be satisfiable in every branch")
+          (is (= [[{:branch '*} :name]] (:paths (:data ex-data))))
+          (is (some #{[{:branch '*} :type]} (:available (:data ex-data)))
+              "attributes common to all branches are '*-available"))
+
+        (let [s (select *schema* {'* [:name]} {:verify-selection false})]
+          (is (true?  (m/validate s {:type :human :name "x"})))
+          (is (false? (m/validate s {:type :human}))
+              ":name required where it exists")
+          (is (true?  (m/validate s {:type :sized}))
+              ":name is a no-op for branches lacking it")))
+
+      (testing "selection shape must mirror schema shape"
+        (let [ex-data (try
+                        (select *schema* [:name])
+                        (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+          (is (= ::sut/unknown-paths (:type ex-data))
+              "a vector selection can't target branches")
+          (is (some? (:hint (:data ex-data)))))
+        (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+                     (select *schema* {:baz [:type]}))
+            "unknown branch")
+        (let [ex-data (try
+                        (select [:map [:name :string]] {:name []})
+                        (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+          (is (some? (:hint (:data ex-data)))
+              "a map selection can't target attributes of a map-schema")))
+
+      (testing "pruning drops unmentioned branches"
+        (expect-selection-to-validate   ^:only {:human [:name]} {:type :human :name "x"})
+        (expect-selection-to-invalidate ^:only {:human [:name]} {:type :sized :size 1}
+                                        ":sized-branch is dropped")
+        (expect-selection-to-invalidate ^:only {:human [:name]} {:name "x"}
+                                        "dispatch key :type stays required")
+        (expect-selection-to-validate   ^:only {} {:type :sized}
+                                        "no branch mentioned: all branches stay"))))
+
+  (testing "nested multi"
+    (binding [*schema* [:map
+                        [:id :int]
+                        [:pet [:multi {:dispatch :kind}
+                               [:dog [:map [:kind :keyword] [:breed :string]]]
+                               [:cat [:map [:kind :keyword] [:lives :int]]]]]]]
+      (expect-selection-to-validate   [:id {:pet {:dog [:breed]}}] {:id 1}
+                                      ":pet stays optional")
+      (expect-selection-to-invalidate [:id {:pet {:dog [:breed]}}] {:id 1 :pet {:kind :dog}})
+      (expect-selection-to-validate   [:id {:pet {:dog [:breed]}}] {:id 1 :pet {:kind :dog :breed "lab"}})
+      (expect-selection-to-validate   [:id {:pet {:dog [:breed]}}] {:id 1 :pet {:kind :cat}}
+                                      "unmentioned :cat-branch is all-optional")
+      (expect-selection-to-validate   [{:pet {}}] {}
+                                      "mentioning a multi without selecting from it is allowed")))
+
+  (testing "function dispatch: no auto-required key"
+    (binding [*schema* [:multi {:dispatch (fn [x] (if (:name x) :named :anon))}
+                        [:named [:map [:name :string]]]
+                        [:anon [:map [:id :int]]]]]
+      (expect-selection-to-validate {:named [:name]} {:name "x"})
+      (expect-selection-to-validate {:named [:name]} {}
+                                    ":anon-branch is all-optional")))
+
+  (testing "selector"
+    (binding [*selector* (selector [:multi {:dispatch :type}
+                                    [:human [:map [:type :keyword] [:name :string]]]
+                                    [:sized [:map [:type :keyword] [:size :int]]]])]
+      (expect-selection-to-validate   {:human [:name]} {:type :human :name "x"})
+      (expect-selection-to-invalidate {:human [:name]} {:type :human})
+      (expect-selection-to-validate   ^:only {:human [:name]} {:type :human :name "x"})
+      (expect-selection-to-invalidate ^:only {:human [:name]} {:type :sized :size 1}
+                                      ":sized-branch is dropped"))))
+
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})
 

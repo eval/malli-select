@@ -4,6 +4,18 @@
 
 ### Added
 
+- `:multi` schema support: branches are selected with a *map*-selection —
+  keys are dispatch values, values are sub-selections. `{:human [:name]}`
+  requires `:name` in branch `:human`; unmentioned branches become
+  all-optional. `'*` as branch key addresses every branch (its sub-selection
+  must be satisfiable in each; `'*` merges with explicit branch keys). A
+  keyword `:dispatch` key is auto-required in every explicit map-branch.
+  Pruning (`^:only`) drops unmentioned branches (mentioning none keeps all).
+  `selectable-paths` and verification errors spell branch segments as
+  `{:branch dispatch-value}`, and shape mismatches (vector selection on a
+  `:multi`, map selection on a `:map`) come with a `:hint`.
+  See the README's "Multi-schemas" section, incl. limitations.
+
 - ClojureScript support: the library is now `.cljc` and tested on Node
   (`clojure -M:cljs-test`) as well as the JVM.
 - `:verify-selection` accepts two new values besides `:throw`/`:assert` and
