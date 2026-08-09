@@ -40,11 +40,12 @@
 
 (defn- sel->map
   "Turns `[:a {:b [:c]} {:b [:d]} :e]`
-  into `{nil [:a :e] :b [:d]}` (i.e. last `:b` wins)."
+  into `{nil [:a :e] :b [:c :d]}` (i.e. duplicate keys merge)."
   [sel]
   (persistent! (reduce (fn [acc i]
                          (if (map? i)
-                           (reduce conj! acc i)
+                           (reduce-kv (fn [acc k v]
+                                        (assoc! acc k (into (get acc k []) v))) acc i)
                            (assoc! acc nil (conj (get acc nil) i)))) (transient {}) sel)))
 
 
@@ -183,7 +184,7 @@
   Combinations:
   - `[:address {:address [:street]}]` - require `:address` but only its `:street` is required.
   - `[:address {:address [] :friends [:name]}]` - require `:address` and optionally `:friends`.
-  - `[{:friends [:name]} {:friends [:age]}]` - only require `:age` of friends if `:friends` provided (last selection wins).
+  - `[{:friends [:name]} {:friends [:age]}]` - require `:name` and `:age` of friends if `:friends` provided (selections merge).
 
   `options`:
   - `verify-selection` - what to do when `selection` contains paths not in `schema`. Defaults to `*verify-selection*` (initially `:throw`):

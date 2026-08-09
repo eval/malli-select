@@ -109,8 +109,11 @@
           (expect-selection-to-invalidate [{:roles [:name]}] {:roles #{{}}})
           (expect-selection-to-validate   [{:roles [:name]}] {:roles #{{:name "Admin"}}})
 
-          (expect-selection-to-validate [{:address [:street]} {:address [:zip]}] {:address {:zip 1234}}
-                                        "last selection of :address wins")
+          (expect-selection-to-invalidate [{:address [:street]} {:address [:zip]}] {:address {:zip 1234}}
+                                          "selections for :address merge - :street also required")
+          (expect-selection-to-validate [{:address [:street]} {:address [:zip]}]
+                                        {:address {:street "Main" :zip 1234}}
+                                        "selections for :address merge")
 
           (expect-selection-to-invalidate [{:address [:street] :roles [:name]}
                                            {:address [:zip]}]
@@ -118,8 +121,8 @@
                                           "selection maps are merged")
           (expect-selection-to-validate [{:address [:street] :roles [:name]}
                                          {:address [:zip]}]
-                                        {:address {:zip 1234} :roles #{{:name "Admin"}}}
-                                        "[:address :street] is overridden by [:address :zip]")
+                                        {:address {:street "Main" :zip 1234} :roles #{{:name "Admin"}}}
+                                        "[:address :street] merges with [:address :zip]")
 
           (expect-selection-to-validate [{:address [{:country [:name]}]}]
                                         {:address {:country {"DK" {:name "Denmark"}}}}

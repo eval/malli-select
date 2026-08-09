@@ -28,5 +28,18 @@
   If you were catching `AssertionError` or matching the assert message, update your code.
   The preferred spelling of the `:verify-selection` option is now `:throw` (the default);
   `:assert` still works, as do the `:skip`/`nil`/`false` opt-outs.
+- Selections with duplicate keys now merge instead of "last wins"
+  ([`404d677`](https://github.com/eval/malli-select/commit/404d677)).
+  `[{:friends [:name]} {:friends [:age]}]` now requires both `:name` and
+  `:age` of friends; it used to require only `:age`. The merge is a union of
+  required paths, so results only get stricter, and it applies at every
+  nesting level.
+  Consequences:
+  - To override instead of merge, build a single map yourself.
+  - A later `{:friends []}` is now a no-op; it used to reset the
+    `:friends` sub-selection to all-optional.
+  - With `:prune-optionals` / `^:only`, merged selections keep more
+    attributes, so generated samples can gain fields.
 
-[Unreleased]: https://github.com/eval/malli-select/compare/v0.7.0...HEAD
+Older releases are documented on the
+[GitHub releases page](https://github.com/eval/malli-select/releases).
