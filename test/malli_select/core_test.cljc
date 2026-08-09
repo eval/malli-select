@@ -5,7 +5,7 @@
   (:require
    [clojure.pprint :refer [pprint]]
    [clojure.test :as t :refer [deftest is testing]]
-   [malli-select.core :as sut :refer [select select-only selector]]
+   [malli-select.core :as sut :refer [prune select select-only selector]]
    [malli.core :as m]
    [malli.generator :as mg]))
 
@@ -406,6 +406,102 @@
     (testing "generated samples validate against the pruned schema"
       (let [s (select-only Person [:name {:addresses [:street]}])]
         (is (every? (partial m/validate s) (mg/sample s)))))))
+
+(defn- normalized-form
+  "`m/form` with the entries of every `:map` sorted by key.
+  `select-only` re-appends a pruned dispatch key while `prune` leaves it in
+  place, so equivalence of the two holds up to map-entry order."
+  [schema]
+  (letfn [(norm [form]
+            (if (vector? form)
+              (let [form (mapv norm form)]
+                (if (= :map (first form))
+                  (let [[head entries] (split-with (complement vector?) form)]
+                    (into (vec head) (sort-by first (vec entries))))
+                  form))
+              form))]
+    (norm (m/form schema))))
+
+(deftest prune-test
+  (let [Person [:map
+                [:name :string]
+                [:age {:optional true} :int]
+                [:addresses {:optional true}
+                 [:vector [:map
+                           [:street :string]
+                           [:zip {:optional true} :int]]]]]
+        Loose  [:map
+                [:name :string]
+                [:addresses {:optional true}
+                 [:vector [:map
+                           [:street {:optional true} :string]
+                           [:zip {:optional true} :int]]]]]
+        Animal [:multi {:dispatch :type}
+                [:human [:map [:type :keyword] [:name {:optional true} :string]]]
+                [:sized [:map [:type :keyword] [:size {:optional true} :int]]]]]
+    (testing "bare"
+      (is (= [:map [:name :string]
+              [:addresses {:optional true} [:vector [:map [:street :string]]]]]
+             (m/form (prune Person)))
+          "optional leaves are dropped; optional entries with a required descendant stay")
+      (is (= [:map [:name :string]]
+             (m/form (prune Loose)))
+          "fully-optional subtrees are dropped")
+      (is (= (m/form (prune Person))
+             (m/form (prune (prune Person))))
+          "prune is idempotent"))
+
+    (testing "keep-selection"
+      (is (= [:map [:name :string]
+              [:addresses {:optional true} [:vector :map]]]
+             (m/form (prune Loose [{:addresses []}])))
+          "keep :addresses as an empty optional map")
+      (is (= [:map [:name :string]
+              [:addresses {:optional true} [:vector [:map [:street {:optional true} :string]]]]]
+             (m/form (prune Loose [{:addresses [:street]}])))
+          "kept entries stay optional"))
+
+    (testing "multi"
+      (is (= [:multi {:dispatch :type}
+              [:human [:map [:type :keyword]]]
+              [:sized [:map [:type :keyword]]]]
+             (m/form (prune Animal)))
+          "no branch mentioned: all branches stay, dispatch key survives")
+      (is (= [:multi {:dispatch :type}
+              [:human [:map [:type :keyword]]]]
+             (m/form (prune Animal {:human []})))
+          "mentioning a branch drops the unmentioned ones"))
+
+    (testing "verification"
+      (let [ex-data (try
+                      (prune Person [:nope])
+                      (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+        (is (= ::sut/unknown-paths (:type ex-data))
+            "unknown keep-paths throw"))
+      (is (some? (prune Person [:nope] {:verify-selection false}))))
+
+    (testing "equivalence with select-only"
+      (doseq [sel [[:name]
+                   [:name {:addresses []}]
+                   [{:addresses [:street]}]]]
+        (is (= (m/form (select-only Person sel))
+               (m/form (prune (select Person sel) sel)))
+            (str "sel: " (pr-str sel))))
+      ;; select-only re-appends the pruned dispatch key at the end, prune
+      ;; never prunes it: compare with map-entries sorted.
+      (is (= (normalized-form (select-only Animal {:human [:name]}))
+             (normalized-form (prune (select Animal {:human [:name]}) {:human [:name]})))))
+
+    (testing "generation"
+      (let [s (prune (select Person [:name {:addresses [:street]}]))]
+        (is (every? (partial m/validate s) (mg/sample s))))
+      (let [HumanOrSized [:multi {:dispatch :type}
+                          [:human [:map [:type [:= :human]] [:name {:optional true} :string]]]
+                          [:sized [:map [:type [:= :sized]] [:size {:optional true} :int]]]]
+            s            (prune HumanOrSized {:human []})]
+        (is (every? (partial m/validate s) (mg/sample s)))
+        (is (every? #(= :human (:type %)) (mg/sample s))
+            "no samples from dropped branches")))))
 
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})

@@ -65,6 +65,21 @@
             {::m/walk-schema-refs true ::m/walk-refs true})
     @!acc))
 
+(defn- multi-dispatch-paths
+  "Map of raw path → dispatch key, for every `:multi` in `schema` with a
+  keyword `:dispatch`."
+  [schema]
+  (let [!acc (atom {})]
+    (m/walk schema
+            (fn [s path _ _]
+              (when (= :multi (m/type s))
+                (let [dispatch (:dispatch (m/properties s))]
+                  (when (keyword? dispatch)
+                    (swap! !acc assoc path dispatch))))
+              s)
+            {::m/walk-schema-refs true ::m/walk-refs true})
+    @!acc))
+
 (defn- schema-path-walker
   "Walker that fires `map-f` at `:map` nodes and `multi-f` at `:multi` nodes.
   `multi-f` also receives the original (pre-walk) schema."
@@ -217,7 +232,7 @@
 (defn- -select
   [schema selection
    {:as   options
-    ::keys [optionalized]
+    ::keys [optionalized keep-only]
     :keys [verify-selection prune-optionals]
     :or
     {verify-selection *verify-selection*}}]
@@ -255,6 +270,8 @@
                                      (when prune-optionals
                                        (let [self&parent-paths (take (inc (count path)) (iterate pop path))]
                                          (swap! !prune-exclusions into self&parent-paths))))
+          multi-dispatches         (when keep-only (multi-dispatch-paths schema))
+          !required-below          (atom #{})
 
           walker (let [optionalize-step (fn optionalize-step [v]
                                           (update v 0 mu/optional-keys))
@@ -266,24 +283,48 @@
                                               (let [star? (some #{'*} to-require)]
                                                 (record-seen! schema cleaned-path to-require)
                                                 (record-prune-exclusions! path)
-                                                (update v 0
-                                                        #(if star?
-                                                           (mu/required-keys %)
-                                                           (mu/required-keys % to-require)))))))
+                                                (if keep-only
+                                                  ;; keep, don't require: protect the mentioned
+                                                  ;; keys themselves (they stay optional).
+                                                  (let [ks (if star?
+                                                             (map first (m/entries schema))
+                                                             (remove #{'?} to-require))]
+                                                    (swap! !prune-exclusions into (map (partial conj path) ks))
+                                                    v)
+                                                  (update v 0
+                                                          #(if star?
+                                                             (mu/required-keys %)
+                                                             (mu/required-keys % to-require))))))))
 
                        prune-step  (fn prune-step [[schema path :as v]]
-                                     (let [prunable? (every-pred (comp :optional second)
-                                                                 (comp not @!prune-exclusions #(conj path %) first))
+                                     (let [prunable? (cond-> (every-pred (comp :optional second)
+                                                                         (comp not @!prune-exclusions #(conj path %) first))
+                                                       ;; standalone prune: keep optional entries
+                                                       ;; whose subtree has a required attribute.
+                                                       keep-only
+                                                       (every-pred (comp not @!required-below #(conj path %) first)))
                                            children  (remove prunable? (m/children schema))]
                                        (update v 0 #(m/into-schema (m/type %) (m/-properties %)
                                                                    children (m/-options %)))))
+                       ;; bottom-up: mark this map (and its ancestors) when it has a
+                       ;; required entry. The dispatch key of a `:multi` branch doesn't
+                       ;; count: it is required in any well-formed branch.
+                       required-record-step
+                       (fn required-record-step [[schema path :as v]]
+                         (let [dispatch (when (seq path) (get multi-dispatches (pop path)))]
+                           (when (some (fn [[k props _]]
+                                         (and (not (:optional props)) (not= k dispatch)))
+                                       (m/children schema))
+                             (swap! !required-below into (take (inc (count path)) (iterate pop path)))))
+                         v)
                        wrap        (fn [stack step]
                                      #(step (stack %)))
                        middlewares (cond-> identity
-                                     (not optionalized)  (wrap optionalize-step)
-                                     (not all-optional?) (wrap require-step)
-                                     prune-optionals     (wrap prune-step)
-                                     :finally            (wrap first))
+                                     (not (or optionalized keep-only)) (wrap optionalize-step)
+                                     (not all-optional?)               (wrap require-step)
+                                     prune-optionals                   (wrap prune-step)
+                                     keep-only                         (wrap required-record-step)
+                                     :finally                          (wrap first))
 
                        ;; a `'?` selection at a :multi ({:pet {}}, [{:pet []}]) mentions
                        ;; the multi: mark it seen and protect it from pruning.
@@ -389,7 +430,7 @@
     - `:log` - print a warning (stderr on Clojure, `console.warn` on ClojureScript) and continue.
     - a function - called with `{:paths ... :available ...}`, result ignored, selection continues.
     - `:skip`, `false`, `nil` - don't verify.
-  - `prune-optionals` (`false` (default), `true`) - whether all fully optional subtrees should be removed from the resulting schema. Alternatively via metadata of selection: `^:only [:name]` (flag takes precedence over metadata). See also `select-only`, which forces this option.
+  - `prune-optionals` (`false` (default), `true`) - whether all fully optional subtrees should be removed from the resulting schema. Alternatively via metadata of selection: `^:only [:name]` (flag takes precedence over metadata). See also `select-only`, which forces this option, and `prune`, for pruning an existing schema without selecting.
     Typically used when the selected schema is used for data generation.
 
   Examples:
@@ -430,6 +471,45 @@
    (select-only schema selection nil))
   ([schema selection options]
    (select schema selection (assoc options :prune-optionals true))))
+
+
+(defn prune
+  "Remove every optional subtree of `schema` that contains no required
+  attribute. Required entries, and optional entries whose subtree contains
+  a required attribute, always stay. Typically used to generate samples
+  without optional noise from a schema that already is a selection.
+
+  NOTE: `keep-selection` uses the selection notation of `select`, but it
+  means KEEP, not require: `(prune S [:a])` does *not* prune `:a`, and
+  kept entries stay optional.
+
+  For `:multi` schemas the branch rule *subtracts*: mentioning one or more
+  branches keeps only those branches; mentioning none keeps all. (A keyword
+  `:dispatch` key stays required in every kept explicit map-branch.)
+
+  `options` are those of `select`: `:verify-selection` applies to the
+  keep-selection; `:prune-optionals` is implied.
+
+  Examples:
+  ```
+  (prune Selected)                          ;; only the required spine stays
+  (prune Selected [{:addresses []}])        ;; also keep :addresses as empty optional map
+  (prune Selected [{:addresses [:street]}]) ;; keep :addresses with an OPTIONAL :street
+  (prune Animal {:human []})                ;; keep only branch :human
+  ```
+  Related: `(select-only S sel)` ≡ `(prune (select S sel) sel)` — the same
+  selection acts as require-spec, then keep-spec."
+  ([schema]
+   (prune schema [] nil))
+  ([schema keep-selection]
+   (prune schema keep-selection nil))
+  ([schema keep-selection {:as   options
+                           :keys [verify-selection]
+                           :or   {verify-selection *verify-selection*}}]
+   (-select schema keep-selection (assoc options
+                                         :verify-selection verify-selection
+                                         :prune-optionals true
+                                         ::keep-only true))))
 
 
 (defn selector
