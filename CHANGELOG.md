@@ -4,6 +4,11 @@
 
 ### Added
 
+- `prune-optionals`: standalone pruning of any schema — removes every optional subtree
+  that contains no required attribute. Takes an optional keep-selection
+  (positional, selection notation): mentioned entries are kept but stay
+  optional. For `:multi` schemas, mentioning branches keeps only those
+  branches. See the README's "Pruning" section.
 - `select-only`: explicit alternative to `^:only` metadata /
   `{:prune-optionals true}`; forces pruning (also when the caller passes
   `:prune-optionals false`).

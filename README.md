@@ -162,6 +162,54 @@ Limitations:
 - A function-valued `:dispatch` disables the dispatch-key auto-require.
 
 
+## Pruning
+
+`select-only` needs schema and selection at hand. When a schema already *is*
+a selection — or is hand-written with optional keys — use `prune-optionals`: it removes
+every optional subtree that contains no required attribute.
+
+``` clojure
+user=> (def Selected
+         (ms/select [:map
+                     [:name string?]
+                     [:age pos-int?]
+                     [:addresses [:vector [:map
+                                           [:street string?]
+                                           [:zip string?]]]]]
+                    [:name]))
+
+user=> (p (ms/prune-optionals Selected))
+[:map [:name string?]]
+
+;; the second argument is a *keep*-selection: it reuses the selection
+;; notation, but mentioned entries are KEPT, not required - they stay optional:
+user=> (p (ms/prune-optionals Selected [{:addresses []}]))
+[:map
+ [:name string?]
+ [:addresses {:optional true} [:vector :map]]]
+
+user=> (p (ms/prune-optionals Selected [{:addresses [:street]}]))
+[:map
+ [:name string?]
+ [:addresses {:optional true}
+  [:vector [:map [:street {:optional true} string?]]]]]
+
+;; multi-schemas: mentioning one or more branches keeps only those branches,
+;; mentioning none keeps all. (Without this rule a pruned Animal would keep
+;; generating bare `{:type :sized}` samples.)
+user=> (p (ms/prune-optionals Animal {:human []}))
+[:multi {:dispatch :type}
+ [:human [:map [:type :keyword] [:name string?] [:age pos-int?]]]]
+```
+
+Optional entries whose subtree contains a required attribute survive a prune —
+e.g. hand-written `[:addresses {:optional true} [:map [:street :string]]]`
+keeps `:addresses` (and its required `:street`).
+
+Related: `(ms/select-only S sel)` ≡ `(ms/prune-optionals (ms/select S sel) sel)` — the
+same selection acts as require-spec, then keep-spec.
+
+
 ## LICENSE
 
 Copyright (c) 2026 Gert Goet, ThinkCreate.
