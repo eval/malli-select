@@ -248,38 +248,42 @@
                                      "All but :name optional")))
 
 (deftest multi-select-test
-  (testing "branch selections"
-    (binding [*schema* [:multi {:dispatch :type}
-                        [:foo [:map [:f :string] [:fo :string]]]
-                        [:bar [:map [:b :string] [:ba :string]]]
-                        [::m/default [:map [:d :string] [:de :string]]]]]
-      (expect-selection-to-validate {}
-                                    {}
-                                    "everything (in default-branch) is optional")
-      (expect-selection-to-validate []
-                                    {}
-                                    "everything (in default-branch) is optional")
-      (expect-selection-to-validate {:foo [:f]}
-                                    {}
-                                    "only the foo-branch has required atts")
-      (expect-selection-to-invalidate {:foo [:f]}
-                                      {:type :foo}
-                                      "foo-branch requires :f")
-      (expect-selection-to-validate {:foo [:f]}
-                                    {:type :foo :f ""}
-                                    "foo-branch requires only f")
-      (expect-selection-to-validate {:foo ['*]}
-                                    {:type :foo :f "" :fo ""}
-                                    "whole foo-branch required")
-      (expect-selection-to-invalidate {:foo ['*]}
-                                      {:type :foo :f ""}
-                                      "whole foo-branch required")
-      (expect-selection-to-invalidate {::m/default [:d]}
+  (let [S [:multi {:dispatch :type}
+           [:foo [:map [:f :string] [:fo :string]]]
+           [:bar [:map [:b :string] [:ba :string]]]
+           [::m/default [:map [:d :string] [:de :string]]]]]
+    (testing "branch selections"
+      (binding [*schema* S]
+        (expect-selection-to-validate {}
                                       {}
-                                      "default-branch requires :d")
-      (expect-selection-to-validate {::m/default [:d]}
-                                    {:d ""}
-                                    "default-branch requires :d")))
+                                      "everything (in default-branch) is optional")
+        (expect-selection-to-validate []
+                                      {}
+                                      "everything (in default-branch) is optional")
+        (expect-selection-to-validate {:foo [:f]}
+                                      {}
+                                      "only the foo-branch has required atts")
+        (expect-selection-to-invalidate {:foo [:f]}
+                                        {:type :foo}
+                                        "foo-branch requires :f")
+        (expect-selection-to-validate {:foo [:f]}
+                                      {:type :foo :f ""}
+                                      "foo-branch requires only f")
+        (expect-selection-to-validate {:foo ['*]}
+                                      {:type :foo :f "" :fo ""}
+                                      "whole foo-branch required")
+        (expect-selection-to-invalidate {:foo ['*]}
+                                        {:type :foo :f ""}
+                                        "whole foo-branch required")
+        (expect-selection-to-invalidate {::m/default [:d]}
+                                        {}
+                                        "default-branch requires :d")
+        (expect-selection-to-validate {::m/default [:d]}
+                                      {:d ""}
+                                      "default-branch requires :d"))
+      (testing "wrapped"
+        (binding [*schema* [:maybe S]]
+          (expect-selection-to-validate {:foo [:f]})))))
 
   (testing "dispatch key stays required"
     (binding [*schema* [:multi {:dispatch :type}
@@ -313,7 +317,6 @@
               ":name required where it exists")
           (is (true?  (m/validate s {:type :sized}))
               ":name is a no-op for branches lacking it")))
-
       (testing "selection shape must mirror schema shape"
         (let [ex-data (try
                         (select *schema* [:name])
