@@ -39,6 +39,17 @@ jobs:
               clojure -X:test:malli-${{ matrix.malli }}
               ;;
           esac
+  Lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install clj-kondo
+        uses: DeLaGuardo/setup-clojure@4c7a6f613e5089821bb3bb2a33a3ee115578580d # 13.6.1
+        with:
+          clj-kondo: latest
+      - name: Run clj-kondo
+        run: clj-kondo --lint .
   Test-cljs:
     runs-on: ubuntu-latest
     steps:
