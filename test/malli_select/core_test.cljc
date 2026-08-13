@@ -1,0 +1,514 @@
+(ns malli-select.core-test
+  #?(:cljs (:require-macros [malli-select.core-test
+                             :refer [expect-selection-to-validate
+                                     expect-selection-to-invalidate]]))
+  (:require
+   [clojure.pprint :refer [pprint]]
+   [clojure.test :as t :refer [deftest is testing]]
+   [malli-select.core :as sut :refer [prune-optionals select select-only selector]]
+   [malli.core :as m]
+   [malli.generator :as mg]))
+
+(defonce ^:private ^:dynamic
+  *schema* nil)
+
+(defonce ^:private ^:dynamic
+  *selector* nil)
+
+(defn pps [o]
+  (with-out-str (pprint o)))
+
+#?(:clj
+   (defmacro expect-selection-to-validate [sel & data+maybe-reason]
+     `(if ~sel
+        (let [data#       ~(first data+maybe-reason)
+              sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))
+              result#     (or (m/validate sel-schema# data#) (m/explain sel-schema# data#))]
+          (is (true? result#)
+              (cond-> (str "Expected data:\n" (pps data#) "to be valid given schema:\n" (pps (m/form sel-schema#)))
+                ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason))
+                :always                     (str "\nvalidate errors:\n" (pps (:errors result#))))))
+        *schema*)))
+
+#?(:clj
+   (defmacro expect-selection-to-invalidate [sel & data+maybe-reason]
+     `(if ~sel
+        (let [data#       ~(first data+maybe-reason)
+              sel-schema# (if *selector* (*selector* ~sel) (select *schema* ~sel (meta ~sel)))]
+          (is (false? (m/validate sel-schema# data#))
+              (cond-> (str "Expected data:\n" (pps data#) "to be *invalid* given schema:\n" (pps (m/form sel-schema#)))
+                ~(second data+maybe-reason) (str "because:\n" ~(second data+maybe-reason)))))
+        *schema*)))
+
+
+(deftest select-test
+  (testing "common selections"
+    (let [S1 [:map
+              [:name string?]
+              [:handle string?]
+              [:address [:maybe [:map
+                                 [:street string?]
+                                 [:zip int?]
+                                 [:country [:map-of
+                                            string? [:map
+                                                     [:iso string?] [:name string?]]]]]]]
+              [:roles [:set [:map
+                             [:name string?]]]]]]
+      (testing "all optional"
+        (binding [*schema* S1]
+          (expect-selection-to-validate   [] {})
+          (expect-selection-to-validate   [] {:address {:country {}}})
+          (expect-selection-to-invalidate [] {:address {:country {:dk {}}}}
+                                          "types should still match")))
+
+      (testing "root attributes"
+        (binding [*schema* S1]
+          (expect-selection-to-invalidate [:name] {})
+          (expect-selection-to-validate   [:name] {:name "Gert"})
+          (expect-selection-to-invalidate [:handle :name] {:name "Gert"})
+          (expect-selection-to-validate   [:name :handle] {:name "Gert" :handle "eval"})
+          (expect-selection-to-invalidate [:address] {}
+                                          ":address required")
+          (expect-selection-to-validate   [:address] {:address nil}
+                                          ":address key provided - nothing needed from address"))
+
+        ;; wrapped
+        (binding [*schema* [:maybe [:vector S1]]]
+          (expect-selection-to-validate   nil nil "normal malli behavior")
+          (expect-selection-to-validate   nil [{}] "normal malli behavior")
+          (expect-selection-to-invalidate [:name] [{}])
+          (expect-selection-to-validate   [:name] [{:name "Gert"}])
+          (expect-selection-to-invalidate [:handle :name] [{:name "Gert"}])
+          (expect-selection-to-validate   [:name :handle] [{:name "Gert" :handle "eval"}])))
+
+      (testing "nested attributes"
+        (binding [*schema* S1]
+          (expect-selection-to-validate   [{:address [:street]}] {} ":address not provided")
+          (expect-selection-to-invalidate [{:address [:street]}] {:address {}})
+          (expect-selection-to-invalidate [:address {:address [:street]}] {})
+
+          (expect-selection-to-validate   [:address {:address [:street]}] {:address {:street "Main"}}
+                                          "the root :address should not interfere with the nested selection")
+          (expect-selection-to-validate   [{:address [:street]} :address] {:address {:street "Main"}}
+                                          "order of items should not matter here")
+
+          ;; star selection
+          (expect-selection-to-validate   [{:address ['*]}] {} ":address not provided")
+          (expect-selection-to-invalidate [{:address ['*]}] {:address {:street "Main"}})
+          (expect-selection-to-validate   [{:address ['*]}] {:address {:street  "Main"
+                                                                       :zip     1234
+                                                                       :country {}}}
+                                          "all keys of address-map should be required - contents of country optional!")
+          (expect-selection-to-validate   [{:address ['* {:country []}]}]
+                                          {:address {:street  "Main"
+                                                     :zip     1234
+                                                     :country {}}}
+                                          "override star-selection: country-content is optional")
+
+          ;; selecting through a set
+          (expect-selection-to-validate   [{:roles [:name]}] {:roles #{}} "no role provided")
+          (expect-selection-to-invalidate [{:roles [:name]}] {:roles #{{}}})
+          (expect-selection-to-validate   [{:roles [:name]}] {:roles #{{:name "Admin"}}})
+
+          (expect-selection-to-invalidate [{:address [:street]} {:address [:zip]}] {:address {:zip 1234}}
+                                          "selections for :address merge - :street also required")
+          (expect-selection-to-validate [{:address [:street]} {:address [:zip]}]
+                                        {:address {:street "Main" :zip 1234}}
+                                        "selections for :address merge")
+
+          (expect-selection-to-invalidate [{:address [:street] :roles [:name]}
+                                           {:address [:zip]}]
+                                          {:address {:zip 1234} :roles [{}]}
+                                          "selection maps are merged")
+          (expect-selection-to-validate [{:address [:street] :roles [:name]}
+                                         {:address [:zip]}]
+                                        {:address {:street "Main" :zip 1234} :roles #{{:name "Admin"}}}
+                                        "[:address :street] merges with [:address :zip]")
+
+          (expect-selection-to-validate [{:address [{:country [:name]}]}]
+                                        {:address {:country {"DK" {:name "Denmark"}}}}
+                                        "multi-level nesting")))))
+  (testing "schema with refs"
+    (let [S1 [:schema {:registry {"Other" [:map
+                                           [:other boolean?]]}}
+              [:map
+               [:this boolean?]
+               [:that "Other"]]]]
+
+      (testing "marking all optional"
+        (binding [*schema* S1]
+          (expect-selection-to-validate [] {})
+          (expect-selection-to-validate [] {:that {}} "it should walk refs")))
+
+      (testing "star selections"
+        (binding [*schema* (select S1 [])] ;; ensure all optional
+          (expect-selection-to-invalidate ['*] {})
+          (expect-selection-to-validate   ['*] {:this true :that {}})
+          (expect-selection-to-invalidate [{:that ['*]}] {:that {}}
+                                          "it should walk refs and require all keys from Other")
+          (expect-selection-to-validate   [{:that ['*]}] {:that {:other true}}
+                                          "it has all keys of Other-schema")))))
+
+  (testing "options"
+    (testing "prune-optionals"
+      (testing "common"
+        (binding [*schema* [:map
+                            [:name string?]
+                            [:age int?]
+                            [:addresses [:maybe [:vector [:map
+                                                          [:street string?]
+                                                          [:zip int?]]]]]]]
+          (expect-selection-to-validate  ^:only [:name]
+                                         {:name "Gert" :age "N/A" :addresses 1}
+                                         ":age can now be anything as it's no longer part of the schema")
+          (expect-selection-to-invalidate ^:only [{:addresses [:street]}]
+                                          {:addresses [{}]}
+                                          "optional :addresses doesn't trigger a deep prune")
+          (expect-selection-to-validate ^:only [:addresses {:addresses [:street]}]
+                                        {:addresses [{:street "Main"}]})))
+      (testing "optionals with aggregates"
+        (binding [*schema* [:maybe [:map
+                                    [:address [:map [:street string?]]]
+                                    [:friends [:maybe [:vector [:map [:name string?]]]]]
+                                    [:countries [:map-of string? [:map [:name string?]]]]]]]
+          (expect-selection-to-validate ^:only []
+                                        {:countries 1}
+                                        ":countries is no longer part of schema")
+          (expect-selection-to-invalidate ^:only [:countries]
+                                          {:countries 1}
+                                          ":countries should require a map-of string map")
+          (expect-selection-to-invalidate ^:only [:countries]
+                                          {:countries {"foo" 1}}
+                                          ":countries should require a map-of string map")
+          (expect-selection-to-validate ^:only [:countries]
+                                        {:countries {"foo" {}}}
+                                        ":countries is no longer part of the schema")
+
+          (expect-selection-to-validate ^:only [:friends]
+                                        {:friends [{}]}
+                                        ":friends requires just a vector of maps")
+          (expect-selection-to-invalidate ^:only [:friends]
+                                          {:friends [1]}
+                                          ":friends requires just a vector of maps")))
+      (testing "schema with refs"
+        (binding [*schema* [:schema {:registry {"Other" [:map
+                                                         [:other boolean?]]}}
+                            [:map
+                             [:this boolean?]
+                             [:that "Other"]]]]
+          (expect-selection-to-validate  ^:only []
+                                         {:that {:other "?"}}
+                                         ":other can be a string as it should no longer be part of the schema"))))
+    (testing "verify-selection"
+      (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+                   (select int? [:a])))
+      (let [ex-data (try
+                      (select [:map [:name string?]] [:a])
+                      (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+        (is (= ::sut/unknown-paths (:type ex-data)))
+        (is (= '([:a]) (:paths (:data ex-data))))
+        (is (= '([:name]) (:available (:data ex-data)))))
+      (testing ":log logs instead of throwing"
+        (is (some? #?(:clj  (binding [*err* (java.io.StringWriter.)]
+                              (select int? [:a] {:verify-selection :log}))
+                      :cljs (select int? [:a] {:verify-selection :log})))))
+      (testing "a function receives the report"
+        (let [!report (atom nil)
+              result  (select [:map [:name string?]] [:a]
+                              {:verify-selection (partial reset! !report)})]
+          (is (some? result))
+          (is (= '([:a]) (:paths @!report)))
+          (is (= '([:name]) (:available @!report)))))
+      (testing "disabling it"
+        (is (some? (select int? [:a] {:verify-selection :skip})))
+        (is (some? (select int? [:a] {:verify-selection nil}))))
+      (testing "*verify-selection* provides the default"
+        (let [!report (atom nil)]
+          (binding [sut/*verify-selection* (partial reset! !report)]
+            (is (some? (select [:map [:name string?]] [:a])))
+            (is (= '([:a]) (:paths @!report)))
+            ;; explicitly passed option wins
+            (reset! !report nil)
+            (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+                         (select int? [:a] {:verify-selection :throw})))
+            (is (nil? @!report))))))))
+
+(deftest selector-test
+  (binding [*selector* (selector [:map
+                                  [:name string?]
+                                  [:age int?]
+                                  [:addresses [:maybe [:vector [:map
+                                                                [:street string?]
+                                                                [:zip int?]]]]]])]
+    (expect-selection-to-validate  [:name]
+                                   {:name "Foo"}
+                                   "All but :name optional")
+    (expect-selection-to-invalidate  [:name]
+                                     {:name "Foo" :age "NaN"}
+                                     "All but :name optional")))
+
+(deftest multi-select-test
+  (let [S [:multi {:dispatch :type}
+           [:foo [:map [:f :string] [:fo :string]]]
+           [:bar [:map [:b :string] [:ba :string]]]
+           [::m/default [:map [:d :string] [:de :string]]]]]
+    (testing "branch selections"
+      (binding [*schema* S]
+        (expect-selection-to-validate {}
+                                      {}
+                                      "everything (in default-branch) is optional")
+        (expect-selection-to-validate []
+                                      {}
+                                      "everything (in default-branch) is optional")
+        (expect-selection-to-validate {:foo [:f]}
+                                      {}
+                                      "only the foo-branch has required atts")
+        (expect-selection-to-invalidate {:foo [:f]}
+                                        {:type :foo}
+                                        "foo-branch requires :f")
+        (expect-selection-to-validate {:foo [:f]}
+                                      {:type :foo :f ""}
+                                      "foo-branch requires only f")
+        (expect-selection-to-validate {:foo ['*]}
+                                      {:type :foo :f "" :fo ""}
+                                      "whole foo-branch required")
+        (expect-selection-to-invalidate {:foo ['*]}
+                                        {:type :foo :f ""}
+                                        "whole foo-branch required")
+        (expect-selection-to-invalidate {::m/default [:d]}
+                                        {}
+                                        "default-branch requires :d")
+        (expect-selection-to-validate {::m/default [:d]}
+                                      {:d ""}
+                                      "default-branch requires :d"))
+      (testing "wrapped"
+        (binding [*schema* [:maybe S]]
+          (expect-selection-to-validate {:foo [:f]})))))
+
+  (testing "dispatch key stays required"
+    (binding [*schema* [:multi {:dispatch :type}
+                        [:human [:map [:type :keyword] [:name :string] [:age :int]]]
+                        [:sized [:map [:type :keyword] [:size :int]]]]]
+      (expect-selection-to-validate   {} {:type :human})
+      (expect-selection-to-invalidate {} {:name "x"}
+                                      "dispatch key :type is auto-required")
+
+      (testing "'* addresses all branches"
+        (expect-selection-to-validate   {'* [:type]} {:type :sized})
+        (expect-selection-to-validate   {'* [:type] :human [:name]}
+                                        {:type :human :name "x"}
+                                        "'* merges with explicit branches")
+        (expect-selection-to-invalidate {'* [:type] :human [:name]}
+                                        {:type :human}
+                                        "'* merges with explicit branches")
+
+        (let [ex-data (try
+                        (select *schema* {'* [:name]})
+                        (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+          (is (= ::sut/unknown-paths (:type ex-data))
+              "'*-selections must be satisfiable in every branch")
+          (is (= [[{:branch '*} :name]] (:paths (:data ex-data))))
+          (is (some #{[{:branch '*} :type]} (:available (:data ex-data)))
+              "attributes common to all branches are '*-available"))
+
+        (let [s (select *schema* {'* [:name]} {:verify-selection false})]
+          (is (true?  (m/validate s {:type :human :name "x"})))
+          (is (false? (m/validate s {:type :human}))
+              ":name required where it exists")
+          (is (true?  (m/validate s {:type :sized}))
+              ":name is a no-op for branches lacking it")))
+      (testing "selection shape must mirror schema shape"
+        (let [ex-data (try
+                        (select *schema* [:name])
+                        (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+          (is (= ::sut/unknown-paths (:type ex-data))
+              "a vector selection can't target branches")
+          (is (some? (:hint (:data ex-data)))))
+        (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+                     (select *schema* {:baz [:type]}))
+            "unknown branch")
+        (let [ex-data (try
+                        (select [:map [:name :string]] {:name []})
+                        (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+          (is (some? (:hint (:data ex-data)))
+              "a map selection can't target attributes of a map-schema")))
+
+      (testing "pruning drops unmentioned branches"
+        (expect-selection-to-validate   ^:only {:human [:name]} {:type :human :name "x"})
+        (expect-selection-to-invalidate ^:only {:human [:name]} {:type :sized :size 1}
+                                        ":sized-branch is dropped")
+        (expect-selection-to-invalidate ^:only {:human [:name]} {:name "x"}
+                                        "dispatch key :type stays required")
+        (expect-selection-to-validate   ^:only {} {:type :sized}
+                                        "no branch mentioned: all branches stay"))))
+
+  (testing "nested multi"
+    (binding [*schema* [:map
+                        [:id :int]
+                        [:pet [:multi {:dispatch :kind}
+                               [:dog [:map [:kind :keyword] [:breed :string]]]
+                               [:cat [:map [:kind :keyword] [:lives :int]]]]]]]
+      (expect-selection-to-validate   [:id {:pet {:dog [:breed]}}] {:id 1}
+                                      ":pet stays optional")
+      (expect-selection-to-invalidate [:id {:pet {:dog [:breed]}}] {:id 1 :pet {:kind :dog}})
+      (expect-selection-to-validate   [:id {:pet {:dog [:breed]}}] {:id 1 :pet {:kind :dog :breed "lab"}})
+      (expect-selection-to-validate   [:id {:pet {:dog [:breed]}}] {:id 1 :pet {:kind :cat}}
+                                      "unmentioned :cat-branch is all-optional")
+      (expect-selection-to-validate   [{:pet {}}] {}
+                                      "mentioning a multi without selecting from it is allowed")))
+
+  (testing "function dispatch: no auto-required key"
+    (binding [*schema* [:multi {:dispatch (fn [x] (if (:name x) :named :anon))}
+                        [:named [:map [:name :string]]]
+                        [:anon [:map [:id :int]]]]]
+      (expect-selection-to-validate {:named [:name]} {:name "x"})
+      (expect-selection-to-validate {:named [:name]} {}
+                                    ":anon-branch is all-optional")))
+
+  (testing "selector"
+    (binding [*selector* (selector [:multi {:dispatch :type}
+                                    [:human [:map [:type :keyword] [:name :string]]]
+                                    [:sized [:map [:type :keyword] [:size :int]]]])]
+      (expect-selection-to-validate   {:human [:name]} {:type :human :name "x"})
+      (expect-selection-to-invalidate {:human [:name]} {:type :human})
+      (expect-selection-to-validate   ^:only {:human [:name]} {:type :human :name "x"})
+      (expect-selection-to-invalidate ^:only {:human [:name]} {:type :sized :size 1}
+                                      ":sized-branch is dropped"))))
+
+(deftest select-only-test
+  (let [Person [:map
+                [:name :string]
+                [:age :int]
+                [:addresses [:vector [:map [:street :string] [:zip :int]]]]]]
+    (testing "same result as select with pruning"
+      (is (= (m/form (select Person [:name] {:prune-optionals true}))
+             (m/form (select-only Person [:name]))))
+      (is (= (m/form (select Person ^:only [:name]))
+             (m/form (select-only Person [:name])))))
+
+    (testing ":prune-optionals is forced"
+      (is (= (m/form (select-only Person [:name]))
+             (m/form (select-only Person [:name] {:prune-optionals false})))))
+
+    (testing "other options pass through"
+      (let [ex-data (try
+                      (select-only Person [:nope])
+                      (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+        (is (= ::sut/unknown-paths (:type ex-data))))
+      (is (some? (select-only Person [:nope] {:verify-selection false}))))
+
+    (testing "multi: unmentioned branches are dropped"
+      ;; the pruned dispatch key gets re-appended, hence :name before :type
+      (is (= [:multi {:dispatch :type}
+              [:human [:map [:name :string] [:type :keyword]]]]
+             (m/form (select-only [:multi {:dispatch :type}
+                                   [:human [:map [:type :keyword] [:name :string] [:age :int]]]
+                                   [:sized [:map [:type :keyword] [:size :int]]]]
+                                  {:human [:name]})))))
+
+    (testing "generated samples validate against the pruned schema"
+      (let [s (select-only Person [:name {:addresses [:street]}])]
+        (is (every? (partial m/validate s) (mg/sample s)))))))
+
+(defn- normalized-form
+  "`m/form` with the entries of every `:map` sorted by key.
+  `select-only` re-appends a pruned dispatch key while `prune-optionals` leaves it in
+  place, so equivalence of the two holds up to map-entry order."
+  [schema]
+  (letfn [(norm [form]
+            (if (vector? form)
+              (let [form (mapv norm form)]
+                (if (= :map (first form))
+                  (let [[head entries] (split-with (complement vector?) form)]
+                    (into (vec head) (sort-by first (vec entries))))
+                  form))
+              form))]
+    (norm (m/form schema))))
+
+(deftest prune-optionals-test
+  (let [Person [:map
+                [:name :string]
+                [:age {:optional true} :int]
+                [:addresses {:optional true}
+                 [:vector [:map
+                           [:street :string]
+                           [:zip {:optional true} :int]]]]]
+        Loose  [:map
+                [:name :string]
+                [:addresses {:optional true}
+                 [:vector [:map
+                           [:street {:optional true} :string]
+                           [:zip {:optional true} :int]]]]]
+        Animal [:multi {:dispatch :type}
+                [:human [:map [:type :keyword] [:name {:optional true} :string]]]
+                [:sized [:map [:type :keyword] [:size {:optional true} :int]]]]]
+    (testing "bare"
+      (is (= [:map [:name :string]
+              [:addresses {:optional true} [:vector [:map [:street :string]]]]]
+             (m/form (prune-optionals Person)))
+          "optional leaves are dropped; optional entries with a required descendant stay")
+      (is (= [:map [:name :string]]
+             (m/form (prune-optionals Loose)))
+          "fully-optional subtrees are dropped")
+      (is (= (m/form (prune-optionals Person))
+             (m/form (prune-optionals (prune-optionals Person))))
+          "prune-optionals is idempotent"))
+
+    (testing "keep-selection"
+      (is (= [:map [:name :string]
+              [:addresses {:optional true} [:vector :map]]]
+             (m/form (prune-optionals Loose [{:addresses []}])))
+          "keep :addresses as an empty optional map")
+      (is (= [:map [:name :string]
+              [:addresses {:optional true} [:vector [:map [:street {:optional true} :string]]]]]
+             (m/form (prune-optionals Loose [{:addresses [:street]}])))
+          "kept entries stay optional"))
+
+    (testing "multi"
+      (is (= [:multi {:dispatch :type}
+              [:human [:map [:type :keyword]]]
+              [:sized [:map [:type :keyword]]]]
+             (m/form (prune-optionals Animal)))
+          "no branch mentioned: all branches stay, dispatch key survives")
+      (is (= [:multi {:dispatch :type}
+              [:human [:map [:type :keyword]]]]
+             (m/form (prune-optionals Animal {:human []})))
+          "mentioning a branch drops the unmentioned ones"))
+
+    (testing "verification"
+      (let [ex-data (try
+                      (prune-optionals Person [:nope])
+                      (catch #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo) e (ex-data e)))]
+        (is (= ::sut/unknown-paths (:type ex-data))
+            "unknown keep-paths throw"))
+      (is (some? (prune-optionals Person [:nope] {:verify-selection false}))))
+
+    (testing "equivalence with select-only"
+      (doseq [sel [[:name]
+                   [:name {:addresses []}]
+                   [{:addresses [:street]}]]]
+        (is (= (m/form (select-only Person sel))
+               (m/form (prune-optionals (select Person sel) sel)))
+            (str "sel: " (pr-str sel))))
+      ;; select-only re-appends the pruned dispatch key at the end,
+      ;; prune-optionals never prunes it: compare with map-entries sorted.
+      (is (= (normalized-form (select-only Animal {:human [:name]}))
+             (normalized-form (prune-optionals (select Animal {:human [:name]}) {:human [:name]})))))
+
+    (testing "generation"
+      (let [s (prune-optionals (select Person [:name {:addresses [:street]}]))]
+        (is (every? (partial m/validate s) (mg/sample s))))
+      (let [HumanOrSized [:multi {:dispatch :type}
+                          [:human [:map [:type [:= :human]] [:name {:optional true} :string]]]
+                          [:sized [:map [:type [:= :sized]] [:size {:optional true} :int]]]]
+            s            (prune-optionals HumanOrSized {:human []})]
+        (is (every? (partial m/validate s) (mg/sample s)))
+        (is (every? #(= :human (:type %)) (mg/sample s))
+            "no samples from dropped branches")))))
+
+(comment
+  (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})
+
+  (mu/update-properties :map assoc :closed true)
+  (m/validate [:map {:closed true}] {})
+  )

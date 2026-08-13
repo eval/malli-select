@@ -31,6 +31,17 @@
   (update-keys (filter (comp #(= (name ns) %) namespace key) m)
                (comp keyword name)))
 
+(defn- runner-flags
+  "E.g. `(runner-flags \"test\" {:test/H true}) ;;=> {\"-H\" \"true\"}`"
+  [ns opts]
+  (-> (extract-keys-with-ns ns opts)
+      (update-keys (fn [k]
+                     ;; :H => "-H", :help => "--help"
+                     (let [k (name k)]
+                       (cond->> (str "-" k)
+                         (> (count k) 1) (str "-")))))
+      (update-vals str)))
+
 (defn ^#:fika{:examples [":test/d '\"some-dir\"'"
                          ":test/n '\"some.namespace-test\"'"
                          "# see all runner options\n:test/H true"]}
@@ -39,14 +50,7 @@
 
   Passing options to test-runner possible, see examples." [opts]
   #_(prn :opts opts)
-  (let [test-options   (extract-keys-with-ns "test" opts)
-        test-options   (-> test-options
-                           (update-keys (fn [k]
-                                          ;; :H => "-H", :help => "--help"
-                                          (let [k (name k)]
-                                            (cond->> (str "-" k)
-                                              (> (count k) 1) (str "-")))))
-                           (update-vals str))
+  (let [test-options   (runner-flags "test" opts)
         basis          (b/create-basis {:aliases [:test]})
         cmds           (doto (b/java-command
                               {:basis         basis
@@ -58,9 +62,25 @@
     (when-not (zero? exit) (throw (ex-info "Tests failed" {}))))
   opts)
 
+(defn ^#:fika{:examples [":test-cljs/n '\"some.namespace-test\"'"
+                         "# see all runner options\n:test-cljs/H true"]}
+  test-cljs
+  "Run all the tests on ClojureScript (Node).
+
+  Passing options to cljs-test-runner possible, see examples." [opts]
+  (let [test-options   (runner-flags "test-cljs" opts)
+        basis          (b/create-basis {:aliases [:cljs-test]})
+        cmds           (b/java-command
+                        {:basis     basis
+                         :main      'clojure.main
+                         :main-args (reduce into ["-m" "cljs-test-runner.main"] test-options)})
+        {:keys [exit]} (b/process cmds)]
+    (when-not (zero? exit) (throw (ex-info "CLJS tests failed" {}))))
+  opts)
+
 (b/java-command {:basis (b/create-basis {:aliases [:test]}) :main 'clojure.main})
 (defn- pom-template [version version-type]
-  [[:description "spec2-inspired selection of Malli schemas"]
+  [[:description "Create subschemas of malli-schemas using a spec2-inspired select notation. Works on Clojure and ClojureScript."]
    [:url "https://github.com/eval/malli-select"]
    [:licenses
     [:license
@@ -73,7 +93,7 @@
             [:url "https://github.com/eval/malli-select"]
             [:connection "scm:git:https://github.com/eval/malli-select.git"]
             [:developerConnection "scm:git:ssh:git@github.com:eval/malli-select.git"]]
-     (= :exact version-type) (conj [:tag (str "v" version)]))])
+     (#{:exact :pre} version-type) (conj [:tag (str "v" version)]))])
 
 
 (defn- jar-opts [{:keys [version version-type] :as opts}]
@@ -91,16 +111,11 @@
   e.g. `v1.2.3`, `v1.2.3-pre.1` or `v1.2.3-1-g<sha>`.
   Yields map with `version` and `type`."
   [git-version]
-  (let [type          (condp re-find git-version
-                        #"^v\d+\.\d+\.\d+$"         :exact
-                        #"^v\d+\.\d+\.\d+-pre\.\d+" :pre  ;; pre-tag and any commit after
-                        :build)
-        exact-version (second (re-find #"v(\d+\.\d+\.\d+)" git-version))
-        version       (case type
-                        :exact exact-version
-                        :pre   (str exact-version "-SNAPSHOT")
-                        :build (subs git-version 1))]
-    {:version version :version-type type}))
+  (let [type (condp re-find git-version
+               #"^v\d+\.\d+\.\d+$"          :exact
+               #"^v\d+\.\d+\.\d+-pre\.\d+$" :pre
+               :build)]
+    {:version (subs git-version 1) :version-type type}))
 
 (comment
   (git-version->version&type "v1.2.3-123")
@@ -141,20 +156,20 @@
 (defn
   ^#:fika{:option.only-jar-version-type
           {:name "deploy/only-jar-version-type"
-           :desc "Deploy the built jar based on the type of version it has. One of :full (default, e.g. \"1.2.3\"), :full-and-snapshot (also jar-versions like \"1.2.3-SNAPSHOT\"), :all (any jar that was built)."}}
+           :desc "Deploy the built jar based on the type of version it has. One of :full (default, e.g. \"1.2.3\"), :full-and-pre (also prerelease versions like \"1.2.3-pre.1\"), :all (any jar that was built)."}}
   deploy
   "Deploy the built jar."
   [{:deploy/keys [only-jar-version-type] :or {only-jar-version-type :full} :as opts}]
-  {:pre [(#{:full-and-snapshot :full :all} only-jar-version-type)]}
+  {:pre [(#{:full-and-pre :full :all} only-jar-version-type)]}
   (let [{:keys [jar-file] :as opts} (jar-opts opts)
         pom-file                    (b/pom-path (select-keys opts [:lib :class-dir]))
         version                     (pom-path->version pom-file)
-        [v s]                       (re-find #"^\d+\.\d+\.\d+(-SNAPSHOT)?$" version)
+        [v pre]                     (re-find #"^\d+\.\d+\.\d+(-pre\.\d+)?$" version)
         deploy?                     (or (= :all only-jar-version-type)
-                                        (and (= :full-and-snapshot only-jar-version-type) v)
+                                        (and (= :full-and-pre only-jar-version-type) v)
                                         (and (= :full only-jar-version-type)
                                              v
-                                             (not s)))]
+                                             (not pre)))]
     (if deploy?
       (do
         ;; guards against the write-pom patch (top of this file) silently losing effect
@@ -171,14 +186,14 @@
                          ":build/git-version $(printf '\"%s\"'  $(git describe --tags))"
                          ":build/git-version '\"v1.2.3\"' :deploy/only-jar-version-type :full-and-snapshot"]
 
-              :options.from-commands            '[test build deploy]}
+              :options.from-commands            '[test test-cljs build deploy]}
   release
   "Test, build and deploy.
 
 Deploys *only* when name of the jar built has the right format, see option `deploy/only-jar-version-type`."
   [opts]
   #_(prn :release-opts opts)
-  (deploy (build (test opts))))
+  (deploy (build (test-cljs (test opts)))))
 
 (comment
   
