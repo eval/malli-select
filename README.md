@@ -290,6 +290,13 @@ Guidelines:
   there, its value may be `nil`".
 
 
+## Limitations
+
+- Recursive schemas (e.g. a `::person` whose `:friends` refer back to
+  `[:ref ::person]`) aren't supported yet: selecting from one throws
+  `:malli-select.core/recursive-ref-unsupported`.
+
+
 ## LICENSE
 
 Copyright (c) 2026 Gert Goet, ThinkCreate.

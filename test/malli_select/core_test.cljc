@@ -597,6 +597,65 @@
                             #"unknown-paths"
                             (select S [{:f [:id]}]))))))
 
+(defn- same-validation?
+  "Does re-parsing the form of `selected` (with `opts`) validate every
+  sample the same way as `selected` itself?"
+  [selected opts samples]
+  (let [reparsed (m/schema (m/form selected) opts)]
+    (every? #(= (m/validate selected %) (m/validate reparsed %)) samples)))
+
+(deftest refs-test
+  (let [opts    {:registry (merge (m/default-schemas)
+                                  {::non-empty-string [:string {:min 1}]
+                                   ::lat-lon          [:map [:lat :double] [:lon :double]]})}
+        samples [{} {:name "x"} {:name ""}
+                 {:location {}} {:location {:lat 1.0}} {:location {:lon 1.0}}
+                 {:location {:lat 1.0 :lon 1.0}} {:name "x" :location {:lat 1.0}}]]
+    (doseq [[desc loc] [["keyword ref" ::lat-lon]
+                        ["[:ref ...]"  [:ref ::lat-lon]]]]
+      (testing desc
+        (let [Place [:map [:name ::non-empty-string] [:location loc]]]
+          (testing "selectable paths follow the ref"
+            (is (= #{[:name] [:location] [:location :lat] [:location :lon]}
+                   (sut/selectable-paths Place opts))))
+          (doseq [sel [[] [:name] ['*] [:location] [{:location [:lat]}] [:name {:location ['*]}]]]
+            (testing (str "selection " (pr-str sel))
+              (let [s (select Place sel opts)]
+                (is (same-validation? s opts samples) "form round-trips"))
+              (let [s (select-only Place sel opts)]
+                (is (same-validation? s opts samples) "form round-trips (select-only)"))))
+          (testing "selecting into the ref works"
+            (let [s (select Place [{:location [:lat]}] opts)]
+              (is (m/validate s {:location {:lat 1.0}}))
+              (is (not (m/validate s {:location {:lon 1.0}})))))
+          (testing "a changed ref is inlined"
+            (is (= [:map
+                    [:name {:optional true} ::non-empty-string]
+                    [:location {:optional true} [:map [:lat :double] [:lon {:optional true} :double]]]]
+                   (m/form (select Place [{:location [:lat]}] opts)))))
+          (testing "an unchanged ref keeps its name"
+            (is (= [:map [:name ::non-empty-string]]
+                   (m/form (select-only Place [:name] opts))))))))
+    (testing "local registry ([:schema {:registry ...} ...]) round-trips"
+      (let [Place [:schema {:registry {::ll [:map [:lat :double] [:lon :double]]}}
+                   [:map [:location ::ll]]]
+            s     (select Place [{:location [:lat]}])]
+        (is (same-validation? s nil samples))
+        (is (m/validate s {:location {:lat 1.0}}))))
+    (testing "recursive refs throw a clear error"
+      (let [Person [:schema {:registry {::person [:map
+                                                  [:name :string]
+                                                  [:friends {:optional true}
+                                                   [:vector [:ref ::person]]]]}}
+                    ::person]
+            data   (fn [sel] (try (select Person sel) nil
+                                  (catch #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e
+                                    (ex-data e))))]
+        (doseq [sel [[] [:name] [:name {:friends [:name]}]]]
+          (is (= ::sut/recursive-ref-unsupported (:type (data sel)))
+              (str "selection " (pr-str sel))))
+        (is (= ::person (-> (data [:name]) :data :ref)))))))
+
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})
 

@@ -116,16 +116,47 @@
                      {::m/walk-schema-refs true ::m/walk-refs true})
     @!acc))
 
+(defn- walk-ref
+  "Result of walking a named reference (`[:ref ::x]` or a registry keyword
+  `::x`) whose walked target is `child`.
+
+  Keeping the reference while its target changed would make the form lie:
+  `(m/form selected)` would still say `::x`, and re-parsing it yields the
+  original, unselected schema. So a changed target is inlined; an unchanged
+  one keeps its name.
+
+  When malli stops at a ref it already walked on this path, `child` is the
+  ref's keyword instead of a schema: the schema is recursive. A recursive
+  selection can't be inlined (it never ends), so that's unsupported."
+  [schema child]
+  (cond
+    (not (m/schema? child))
+    (-fail! ::recursive-ref-unsupported
+            {:ref     child
+             :message (str "malli-select doesn't support recursive schemas (yet): "
+                           (pr-str child) " refers to itself")})
+
+    (= (m/form child) (m/form (m/deref schema)))
+    schema
+
+    :else
+    child))
+
 (defn- schema-path-walker
   "Walker that fires `map-f` at `:map` nodes and `multi-f` at `:multi` nodes.
-  `multi-f` also receives the original (pre-walk) schema."
+  `multi-f` also receives the original (pre-walk) schema. Named references
+  are resolved via `walk-ref`."
   [map-f multi-f]
   (fn [schema path children _]
-    (let [walked (m/-set-children schema children)]
-      (case (m/type schema)
-        :map   (map-f walked path)
-        :multi (multi-f walked schema path)
-        walked))))
+    (let [type (m/type schema)]
+      (if (or (= :ref type)
+              (and (= ::m/schema type) (m/-ref schema)))
+        (walk-ref schema (first children))
+        (let [walked (m/-set-children schema children)]
+          (case type
+            :map   (map-f walked path)
+            :multi (multi-f walked schema path)
+            walked))))))
 
 
 (defn- merge-selections
@@ -226,7 +257,8 @@
   "
   ([schema] (selectable-paths schema nil))
   ([schema options]
-   (let [all    (mu/subschemas (m/schema schema options))
+   (let [all    (mu/subschemas (m/schema schema options)
+                                (assoc options ::m/walk-refs true))
          opaque (into [] (keep #(when (opaque? (:schema %)) (:path %))) all)
          below? (fn [path]
                   (some #(and (< (count %) (count path))
