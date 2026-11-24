@@ -268,6 +268,26 @@ Guidelines:
   submitted as `""` often means "not provided". Remove such values at the
   boundary (with a transformer); then "must be filled in" is a plain
   required attribute.
+- **`nil` usually means "absent" too.** JSON `null` and SQL `NULL` mostly mean
+  the value isn't there. Instead of `[:x {:optional true} [:maybe :boolean]]`,
+  which gives two ways to say "absent", remove `nil` values at the boundary
+  and keep `[:x :boolean]` in the schema:
+
+  ``` clojure
+  user=> (def strip-nils
+           (mt/transformer
+             {:decoders {:map #(if (map? %) (into {} (remove (comp nil? val)) %) %)}}))
+  user=> (def S (ms/select [:map [:name :string] [:admin :boolean]] [:name]))
+  user=> (m/validate S {:name "Gert" :admin nil})
+  false
+  user=> (m/validate S (m/decode S {:name "Gert" :admin nil} strip-nils))
+  true
+  ```
+
+  Use `[:maybe ...]` only when `nil` is a meaningful value, e.g. in a patch
+  where `{:email nil}` means "remove the email". Then it belongs to the
+  attribute and stays in the schema; requiring it means "the key must be
+  there, its value may be `nil`".
 
 
 ## LICENSE
