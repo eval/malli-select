@@ -540,6 +540,63 @@
                             #"unknown-paths"
                             (select Place [:nope] opts))))))
 
+(deftest opaque-schemas-test
+  (testing ":not is opaque: selection never changes what it excludes"
+    (let [both-dates [:map [:check-in :any] [:check-out :any]]
+          Booking    [:and
+                      [:map [:email :string] [:check-in :int] [:check-out :int]]
+                      [:or [:not both-dates]
+                       [:fn (fn [{:keys [check-in check-out]}] (< check-in check-out))]]]]
+      (doseq [[desc s] [["select" (select Booking [:email])]
+                        ["select-only" (select-only Booking [:email])]
+                        ["selector" ((selector Booking) [:email])]]]
+        (testing desc
+          (is (m/validate s {:email "a@b.nl"}) "guard skips the check when dates are absent")
+          (is (m/validate s {:email "a@b.nl" :check-in 1 :check-out 3}))
+          (is (not (m/validate s {:email "a@b.nl" :check-in 5 :check-out 3})))
+          (is (some #{[:not both-dates]} (tree-seq vector? seq (m/form s)))
+              ":not subtree is left untouched")))
+      (testing "prune-optionals leaves the :not subtree alone"
+        (is (some #{[:not both-dates]}
+                  (tree-seq vector? seq (m/form (prune-optionals Booking))))))))
+  (testing "no selectable paths below :not"
+    (let [S [:map [:a [:not [:map [:x :int]]]] [:b :int]]]
+      (is (= #{[:a] [:b]} (sut/selectable-paths S)))
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                            #"unknown-paths"
+                            (select S [{:a [:x]}])))
+      (is (= [:map [:a [:not [:map [:x :int]]]] [:b {:optional true} :int]]
+             (m/form (select S [:a]))))
+      (is (= [:map [:a {:title "A" :optional true} [:not [:map [:x :int]]]] [:b :int]]
+             (m/form (select [:map [:a {:title "A"} [:not [:map [:x :int]]]] [:b :int]] [:b])))
+          "entry with properties")))
+  (testing ":not behind a registry ref"
+    (let [opts {:registry (merge (m/default-schemas) {::nope [:not [:map [:x :int]]]})}
+          S    [:map [:a ::nope] [:b :int]]
+          a-of (fn [s] (some (fn [[k _ v]] (when (= :a k) v)) (m/children s)))]
+      (is (= #{[:a] [:b]} (sut/selectable-paths S opts)))
+      (is (= [:not [:map [:x :int]]]
+             (m/form (m/deref (a-of (select S [:b] opts))))))))
+  (testing "a :multi below :not is not a selectable multi"
+    (let [S [:map [:a [:not [:multi {:dispatch :type}
+                             [:x [:map [:type :keyword] [:n :int]]]]]]]]
+      (is (= #{[:a]} (sut/selectable-paths S)))
+      (is (= [:map [:a [:not [:multi {:dispatch :type}
+                              [:x [:map [:type :keyword] [:n :int]]]]]]]
+             (m/form (select S [:a]))))))
+  (testing "function schemas are opaque"
+    (let [S [:map
+             [:f [:=> [:cat [:map [:id :int]]] [:map [:ok :boolean]]]]
+             [:g [:function [:=> [:cat [:map [:id :int]]] :any]]]]]
+      (is (= #{[:f] [:g]} (sut/selectable-paths S)))
+      (is (= [:map
+              [:f [:=> [:cat [:map [:id :int]]] [:map [:ok :boolean]]]]
+              [:g {:optional true} [:function [:=> [:cat [:map [:id :int]]] :any]]]]
+             (m/form (select S [:f]))))
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                            #"unknown-paths"
+                            (select S [{:f [:id]}]))))))
+
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})
 

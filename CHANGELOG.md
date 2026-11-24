@@ -42,6 +42,14 @@
   like `:registry` work when you pass a schema as a vector:
   `(select [:map [:name ::my-type]] [:name] {:registry registry})`. Before
   this change it threw `:malli.core/invalid-schema`.
+- Selection no longer walks into `:not` and function schemas (`:=>`, `:->`,
+  `:function`); they're left untouched. Before, maps inside them were
+  optionalized. Under `:not` that flipped the meaning: e.g. the guard
+  `[:or [:not [:map [:a :any] [:b :any]]] [:fn ...]]` stopped working, so the
+  `:fn` always ran. For function schemas it changed the contract (optional
+  argument keys). `selectable-paths` no longer lists paths below these schemas.
+  A selection into them, e.g. `[{:f [:id]}]` for `[:f [:=> ...]]`, now throws
+  `::unknown-paths`.
 
 ### Breaking
 

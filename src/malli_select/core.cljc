@@ -54,16 +54,51 @@
                (conj tagged (if (contains? multi-paths prefix) {:branch seg} seg))
                more)))))
 
+(def ^:private opaque-types
+  "Schema types selection never walks into. `:not` flips polarity: required
+  keys below it decide what is *excluded*, so optionalizing them changes the
+  meaning. Function schemas describe a contract (arguments are contravariant),
+  not attributes of the data."
+  #{:not :=> :-> :function})
+
+(defn- opaque?
+  "Also true for a map-entry value wrapper (`::m/val`) around an opaque
+  schema: `::m/val` walks its child directly, bypassing the walker's `-inner`."
+  [schema]
+  (let [t (m/type schema)]
+    (or (contains? opaque-types t)
+        (and (= ::m/val t) (opaque? (first (m/children schema)))))))
+
+(defn- walk-selectable
+  "Like `malli.core/walk`, but leaves opaque schemas (see `opaque-types`)
+  untouched: they're neither descended into nor passed to `f`."
+  [schema f options]
+  (let [schema (m/schema schema options)]
+    (if (opaque? schema)
+      schema
+      (m/-walk schema
+               (reify m/Walker
+                 (-accept [_ s _ _] s)
+                 (-inner [this s p options]
+                   (cond
+                     ;; map entries hand us their `::m/val` wrapper; the parent
+                     ;; re-wraps the child, so return the wrapped schema itself.
+                     (and (opaque? s) (= ::m/val (m/type s))) (first (m/children s))
+                     (opaque? s)                              s
+                     :else                                    (m/-walk s this p options)))
+                 (-outer [_ s p c options] (f s p c options)))
+               [] options))))
+
 (defn- multi-branch-keys
   "Map of cleaned path → set of branch keys, for every `:multi` in `schema`."
   [schema]
   (let [!acc (atom {})]
-    (m/walk schema
-            (fn [s path _ _]
-              (when (= :multi (m/type s))
-                (swap! !acc assoc (clean-path path) (into #{} (map first) (m/children s))))
-              s)
-            {::m/walk-schema-refs true ::m/walk-refs true})
+    (walk-selectable schema
+                     (fn [s path _ _]
+                       (when (= :multi (m/type s))
+                         (swap! !acc assoc (clean-path path) (into #{} (map first) (m/children s))))
+                       s)
+                     {::m/walk-schema-refs true ::m/walk-refs true})
     @!acc))
 
 (defn- multi-dispatch-paths
@@ -71,14 +106,14 @@
   keyword `:dispatch`."
   [schema]
   (let [!acc (atom {})]
-    (m/walk schema
-            (fn [s path _ _]
-              (when (= :multi (m/type s))
-                (let [dispatch (:dispatch (m/properties s))]
-                  (when (keyword? dispatch)
-                    (swap! !acc assoc path dispatch))))
-              s)
-            {::m/walk-schema-refs true ::m/walk-refs true})
+    (walk-selectable schema
+                     (fn [s path _ _]
+                       (when (= :multi (m/type s))
+                         (let [dispatch (:dispatch (m/properties s))]
+                           (when (keyword? dispatch)
+                             (swap! !acc assoc path dispatch))))
+                       s)
+                     {::m/walk-schema-refs true ::m/walk-refs true})
     @!acc))
 
 (defn- schema-path-walker
@@ -191,7 +226,13 @@
   "
   ([schema] (selectable-paths schema nil))
   ([schema options]
-   (let [subs   (mu/subschemas (m/schema schema options))
+   (let [all    (mu/subschemas (m/schema schema options))
+         opaque (into [] (keep #(when (opaque? (:schema %)) (:path %))) all)
+         below? (fn [path]
+                  (some #(and (< (count %) (count path))
+                              (= % (subvec path 0 (count %))))
+                        opaque))
+         subs   (remove (comp below? vec :path) all)
          multis (into {}
                       (keep (fn [{s :schema p :path}]
                               (when (= :multi (m/type s))
@@ -383,8 +424,8 @@
                                         (cond-> prune-optionals (multi-prune-step path))
                                         (dispatch-require-step original)))]
                    (schema-path-walker (comp middlewares vector) multi-step))
-          walked (m/walk schema walker
-                         {::m/walk-schema-refs true ::m/walk-refs true})]
+          walked (walk-selectable schema walker
+                                  {::m/walk-schema-refs true ::m/walk-refs true})]
       (when verify-selection?
         (let [invalid-selection-paths (remove @!seen selection-paths)]
           (when (seq invalid-selection-paths)
