@@ -1,5 +1,6 @@
 (ns malli-select.core
   "Select a subset of a malli schema."
+  (:refer-clojure :exclude [selector])
   (:require [clojure.set :as set]
             [malli.core :as m]
             [malli.util :as mu]))
