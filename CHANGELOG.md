@@ -33,6 +33,36 @@
 - The dynamic var `*verify-selection*` (initially `:throw`) provides the
   default for the `:verify-selection` option; an explicitly passed option
   still wins.
+- `selectable-paths` and `selector` take an optional `options` argument.
+
+### Fixed
+
+- `options` of `select`, `select-only`, `prune-optionals`, `selector` and
+  `selectable-paths` are now passed to `malli.core/schema`. So malli options
+  like `:registry` work when you pass a schema as a vector:
+  `(select [:map [:name ::my-type]] [:name] {:registry registry})`. Before
+  this change it threw `:malli.core/invalid-schema`.
+- The form of a selected schema is now faithful for registry references.
+  Before, a reference kept its name (`::address`, `[:ref ::address]`) while
+  selection changed its target, so `(m/schema (m/form selected) opts)` gave
+  back the original, unselected schema. Now a reference whose target changed
+  is inlined; an unchanged reference keeps its name. **Visible change:** forms
+  of selections on schemas with references look different (inlined maps
+  instead of names).
+- Selecting from a schema with an explicit `[:ref ...]` threw
+  `:malli.core/invalid-ref`. It works now, and `selectable-paths` lists paths
+  through `[:ref ...]`.
+- Recursive schemas now throw `::recursive-ref-unsupported` (with the ref in
+  `ex-data`) instead of `:malli.core/invalid-ref`. Recursion isn't supported
+  yet: an inlined selection would never end.
+- Selection no longer walks into `:not` and function schemas (`:=>`, `:->`,
+  `:function`); they're left untouched. Before, maps inside them were
+  optionalized. Under `:not` that flipped the meaning: e.g. the guard
+  `[:or [:not [:map [:a :any] [:b :any]]] [:fn ...]]` stopped working, so the
+  `:fn` always ran. For function schemas it changed the contract (optional
+  argument keys). `selectable-paths` no longer lists paths below these schemas.
+  A selection into them, e.g. `[{:f [:id]}]` for `[:f [:=> ...]]`, now throws
+  `::unknown-paths`.
 
 ### Breaking
 

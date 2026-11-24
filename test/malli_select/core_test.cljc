@@ -506,6 +506,156 @@
         (is (every? #(= :human (:type %)) (mg/sample s))
             "no samples from dropped branches")))))
 
+(deftest options-forwarding-test
+  (let [registry (merge (m/default-schemas)
+                        {::non-empty-string [:string {:min 1}]
+                         ::lat-lon          [:map [:lat :double] [:lon :double]]})
+        opts     {:registry registry}
+        Place    [:map
+                  [:name ::non-empty-string]
+                  [:location ::lat-lon]]]
+    (testing "select resolves a raw vector with the :registry option"
+      (let [s (select Place [:name] opts)]
+        (is (m/validate s {:name "Home"}))
+        (is (not (m/validate s {:name ""})) "type constraint of the registry entry applies")
+        (is (not (m/validate s {})) ":name is required")))
+    (testing "selecting into a registry type"
+      (let [s (select Place [{:location [:lat]}] opts)]
+        (is (m/validate s {:location {:lat 1.0}}))
+        (is (not (m/validate s {:location {:lon 1.0}})))))
+    (testing "select-only and prune-optionals forward options"
+      (is (= [:map [:name ::non-empty-string]]
+             (m/form (select-only Place [:name] opts))))
+      (is (= [:map [:name ::non-empty-string]]
+             (m/form (prune-optionals [:map
+                                       [:name ::non-empty-string]
+                                       [:nickname {:optional true} ::non-empty-string]]
+                                      [] opts)))))
+    (testing "selector and selectable-paths accept options"
+      (is (m/validate ((selector Place opts) [:name]) {:name "Home"}))
+      (is (= #{[:name] [:location] [:location :lat] [:location :lon]}
+             (sut/selectable-paths Place opts))))
+    (testing "verification still works with options"
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                            #"unknown-paths"
+                            (select Place [:nope] opts))))))
+
+(deftest opaque-schemas-test
+  (testing ":not is opaque: selection never changes what it excludes"
+    (let [both-dates [:map [:check-in :any] [:check-out :any]]
+          Booking    [:and
+                      [:map [:email :string] [:check-in :int] [:check-out :int]]
+                      [:or [:not both-dates]
+                       [:fn (fn [{:keys [check-in check-out]}] (< check-in check-out))]]]]
+      (doseq [[desc s] [["select" (select Booking [:email])]
+                        ["select-only" (select-only Booking [:email])]
+                        ["selector" ((selector Booking) [:email])]]]
+        (testing desc
+          (is (m/validate s {:email "a@b.nl"}) "guard skips the check when dates are absent")
+          (is (m/validate s {:email "a@b.nl" :check-in 1 :check-out 3}))
+          (is (not (m/validate s {:email "a@b.nl" :check-in 5 :check-out 3})))
+          (is (some #{[:not both-dates]} (tree-seq vector? seq (m/form s)))
+              ":not subtree is left untouched")))
+      (testing "prune-optionals leaves the :not subtree alone"
+        (is (some #{[:not both-dates]}
+                  (tree-seq vector? seq (m/form (prune-optionals Booking))))))))
+  (testing "no selectable paths below :not"
+    (let [S [:map [:a [:not [:map [:x :int]]]] [:b :int]]]
+      (is (= #{[:a] [:b]} (sut/selectable-paths S)))
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                            #"unknown-paths"
+                            (select S [{:a [:x]}])))
+      (is (= [:map [:a [:not [:map [:x :int]]]] [:b {:optional true} :int]]
+             (m/form (select S [:a]))))
+      (is (= [:map [:a {:title "A" :optional true} [:not [:map [:x :int]]]] [:b :int]]
+             (m/form (select [:map [:a {:title "A"} [:not [:map [:x :int]]]] [:b :int]] [:b])))
+          "entry with properties")))
+  (testing ":not behind a registry ref"
+    (let [opts {:registry (merge (m/default-schemas) {::nope [:not [:map [:x :int]]]})}
+          S    [:map [:a ::nope] [:b :int]]
+          a-of (fn [s] (some (fn [[k _ v]] (when (= :a k) v)) (m/children s)))]
+      (is (= #{[:a] [:b]} (sut/selectable-paths S opts)))
+      (is (= [:not [:map [:x :int]]]
+             (m/form (m/deref (a-of (select S [:b] opts))))))))
+  (testing "a :multi below :not is not a selectable multi"
+    (let [S [:map [:a [:not [:multi {:dispatch :type}
+                             [:x [:map [:type :keyword] [:n :int]]]]]]]]
+      (is (= #{[:a]} (sut/selectable-paths S)))
+      (is (= [:map [:a [:not [:multi {:dispatch :type}
+                              [:x [:map [:type :keyword] [:n :int]]]]]]]
+             (m/form (select S [:a]))))))
+  (testing "function schemas are opaque"
+    (let [S [:map
+             [:f [:=> [:cat [:map [:id :int]]] [:map [:ok :boolean]]]]
+             [:g [:function [:=> [:cat [:map [:id :int]]] :any]]]]]
+      (is (= #{[:f] [:g]} (sut/selectable-paths S)))
+      (is (= [:map
+              [:f [:=> [:cat [:map [:id :int]]] [:map [:ok :boolean]]]]
+              [:g {:optional true} [:function [:=> [:cat [:map [:id :int]]] :any]]]]
+             (m/form (select S [:f]))))
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                            #"unknown-paths"
+                            (select S [{:f [:id]}]))))))
+
+(defn- same-validation?
+  "Does re-parsing the form of `selected` (with `opts`) validate every
+  sample the same way as `selected` itself?"
+  [selected opts samples]
+  (let [reparsed (m/schema (m/form selected) opts)]
+    (every? #(= (m/validate selected %) (m/validate reparsed %)) samples)))
+
+(deftest refs-test
+  (let [opts    {:registry (merge (m/default-schemas)
+                                  {::non-empty-string [:string {:min 1}]
+                                   ::lat-lon          [:map [:lat :double] [:lon :double]]})}
+        samples [{} {:name "x"} {:name ""}
+                 {:location {}} {:location {:lat 1.0}} {:location {:lon 1.0}}
+                 {:location {:lat 1.0 :lon 1.0}} {:name "x" :location {:lat 1.0}}]]
+    (doseq [[desc loc] [["keyword ref" ::lat-lon]
+                        ["[:ref ...]"  [:ref ::lat-lon]]]]
+      (testing desc
+        (let [Place [:map [:name ::non-empty-string] [:location loc]]]
+          (testing "selectable paths follow the ref"
+            (is (= #{[:name] [:location] [:location :lat] [:location :lon]}
+                   (sut/selectable-paths Place opts))))
+          (doseq [sel [[] [:name] ['*] [:location] [{:location [:lat]}] [:name {:location ['*]}]]]
+            (testing (str "selection " (pr-str sel))
+              (let [s (select Place sel opts)]
+                (is (same-validation? s opts samples) "form round-trips"))
+              (let [s (select-only Place sel opts)]
+                (is (same-validation? s opts samples) "form round-trips (select-only)"))))
+          (testing "selecting into the ref works"
+            (let [s (select Place [{:location [:lat]}] opts)]
+              (is (m/validate s {:location {:lat 1.0}}))
+              (is (not (m/validate s {:location {:lon 1.0}})))))
+          (testing "a changed ref is inlined"
+            (is (= [:map
+                    [:name {:optional true} ::non-empty-string]
+                    [:location {:optional true} [:map [:lat :double] [:lon {:optional true} :double]]]]
+                   (m/form (select Place [{:location [:lat]}] opts)))))
+          (testing "an unchanged ref keeps its name"
+            (is (= [:map [:name ::non-empty-string]]
+                   (m/form (select-only Place [:name] opts))))))))
+    (testing "local registry ([:schema {:registry ...} ...]) round-trips"
+      (let [Place [:schema {:registry {::ll [:map [:lat :double] [:lon :double]]}}
+                   [:map [:location ::ll]]]
+            s     (select Place [{:location [:lat]}])]
+        (is (same-validation? s nil samples))
+        (is (m/validate s {:location {:lat 1.0}}))))
+    (testing "recursive refs throw a clear error"
+      (let [Person [:schema {:registry {::person [:map
+                                                  [:name :string]
+                                                  [:friends {:optional true}
+                                                   [:vector [:ref ::person]]]]}}
+                    ::person]
+            data   (fn [sel] (try (select Person sel) nil
+                                  (catch #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e
+                                    (ex-data e))))]
+        (doseq [sel [[] [:name] [:name {:friends [:name]}]]]
+          (is (= ::sut/recursive-ref-unsupported (:type (data sel)))
+              (str "selection " (pr-str sel))))
+        (is (= ::person (-> (data [:name]) :data :ref)))))))
+
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})
 

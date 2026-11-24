@@ -54,16 +54,51 @@
                (conj tagged (if (contains? multi-paths prefix) {:branch seg} seg))
                more)))))
 
+(def ^:private opaque-types
+  "Schema types selection never walks into. `:not` flips polarity: required
+  keys below it decide what is *excluded*, so optionalizing them changes the
+  meaning. Function schemas describe a contract (arguments are contravariant),
+  not attributes of the data."
+  #{:not :=> :-> :function})
+
+(defn- opaque?
+  "Also true for a map-entry value wrapper (`::m/val`) around an opaque
+  schema: `::m/val` walks its child directly, bypassing the walker's `-inner`."
+  [schema]
+  (let [t (m/type schema)]
+    (or (contains? opaque-types t)
+        (and (= ::m/val t) (opaque? (first (m/children schema)))))))
+
+(defn- walk-selectable
+  "Like `malli.core/walk`, but leaves opaque schemas (see `opaque-types`)
+  untouched: they're neither descended into nor passed to `f`."
+  [schema f options]
+  (let [schema (m/schema schema options)]
+    (if (opaque? schema)
+      schema
+      (m/-walk schema
+               (reify m/Walker
+                 (-accept [_ s _ _] s)
+                 (-inner [this s p options]
+                   (cond
+                     ;; map entries hand us their `::m/val` wrapper; the parent
+                     ;; re-wraps the child, so return the wrapped schema itself.
+                     (and (opaque? s) (= ::m/val (m/type s))) (first (m/children s))
+                     (opaque? s)                              s
+                     :else                                    (m/-walk s this p options)))
+                 (-outer [_ s p c options] (f s p c options)))
+               [] options))))
+
 (defn- multi-branch-keys
   "Map of cleaned path → set of branch keys, for every `:multi` in `schema`."
   [schema]
   (let [!acc (atom {})]
-    (m/walk schema
-            (fn [s path _ _]
-              (when (= :multi (m/type s))
-                (swap! !acc assoc (clean-path path) (into #{} (map first) (m/children s))))
-              s)
-            {::m/walk-schema-refs true ::m/walk-refs true})
+    (walk-selectable schema
+                     (fn [s path _ _]
+                       (when (= :multi (m/type s))
+                         (swap! !acc assoc (clean-path path) (into #{} (map first) (m/children s))))
+                       s)
+                     {::m/walk-schema-refs true ::m/walk-refs true})
     @!acc))
 
 (defn- multi-dispatch-paths
@@ -71,26 +106,57 @@
   keyword `:dispatch`."
   [schema]
   (let [!acc (atom {})]
-    (m/walk schema
-            (fn [s path _ _]
-              (when (= :multi (m/type s))
-                (let [dispatch (:dispatch (m/properties s))]
-                  (when (keyword? dispatch)
-                    (swap! !acc assoc path dispatch))))
-              s)
-            {::m/walk-schema-refs true ::m/walk-refs true})
+    (walk-selectable schema
+                     (fn [s path _ _]
+                       (when (= :multi (m/type s))
+                         (let [dispatch (:dispatch (m/properties s))]
+                           (when (keyword? dispatch)
+                             (swap! !acc assoc path dispatch))))
+                       s)
+                     {::m/walk-schema-refs true ::m/walk-refs true})
     @!acc))
+
+(defn- walk-ref
+  "Result of walking a named reference (`[:ref ::x]` or a registry keyword
+  `::x`) whose walked target is `child`.
+
+  Keeping the reference while its target changed would make the form lie:
+  `(m/form selected)` would still say `::x`, and re-parsing it yields the
+  original, unselected schema. So a changed target is inlined; an unchanged
+  one keeps its name.
+
+  When malli stops at a ref it already walked on this path, `child` is the
+  ref's keyword instead of a schema: the schema is recursive. A recursive
+  selection can't be inlined (it never ends), so that's unsupported."
+  [schema child]
+  (cond
+    (not (m/schema? child))
+    (-fail! ::recursive-ref-unsupported
+            {:ref     child
+             :message (str "malli-select doesn't support recursive schemas (yet): "
+                           (pr-str child) " refers to itself")})
+
+    (= (m/form child) (m/form (m/deref schema)))
+    schema
+
+    :else
+    child))
 
 (defn- schema-path-walker
   "Walker that fires `map-f` at `:map` nodes and `multi-f` at `:multi` nodes.
-  `multi-f` also receives the original (pre-walk) schema."
+  `multi-f` also receives the original (pre-walk) schema. Named references
+  are resolved via `walk-ref`."
   [map-f multi-f]
   (fn [schema path children _]
-    (let [walked (m/-set-children schema children)]
-      (case (m/type schema)
-        :map   (map-f walked path)
-        :multi (multi-f walked schema path)
-        walked))))
+    (let [type (m/type schema)]
+      (if (or (= :ref type)
+              (and (= ::m/schema type) (m/-ref schema)))
+        (walk-ref schema (first children))
+        (let [walked (m/-set-children schema children)]
+          (case type
+            :map   (map-f walked path)
+            :multi (multi-f walked schema path)
+            walked))))))
 
 
 (defn- merge-selections
@@ -186,18 +252,28 @@
                                [:street string?]]]]]])
   ;;=> #{[:addresses] [:addresses :street]}
   ```
+
+  `options` are passed to `malli.core/schema`, e.g. `{:registry ...}`.
   "
-  [schema]
-  (let [subs   (mu/subschemas schema)
-        multis (into {}
-                     (keep (fn [{s :schema p :path}]
-                             (when (= :multi (m/type s))
-                               [(clean-path p) (into #{} (map first) (m/children s))])))
-                     subs)]
-    (->> subs
-         (map (comp #(tag-path multis %) clean-path :path))
-         (filter seq)
-         set)))
+  ([schema] (selectable-paths schema nil))
+  ([schema options]
+   (let [all    (mu/subschemas (m/schema schema options)
+                                (assoc options ::m/walk-refs true))
+         opaque (into [] (keep #(when (opaque? (:schema %)) (:path %))) all)
+         below? (fn [path]
+                  (some #(and (< (count %) (count path))
+                              (= % (subvec path 0 (count %))))
+                        opaque))
+         subs   (remove (comp below? vec :path) all)
+         multis (into {}
+                      (keep (fn [{s :schema p :path}]
+                              (when (= :multi (m/type s))
+                                [(clean-path p) (into #{} (map first) (m/children s))])))
+                      subs)]
+     (->> subs
+          (map (comp #(tag-path multis %) clean-path :path))
+          (filter seq)
+          set))))
 
 
 (defn- star-available
@@ -239,7 +315,8 @@
     {verify-selection *verify-selection*}}]
   (letfn [(in? [coll elm]
             (some #(= % elm) coll))]
-    (let [all-optional?            (empty? selection)
+    (let [schema                   (m/schema schema options)
+          all-optional?            (empty? selection)
           verify-selection?        (and (not (in? #{nil false :skip} verify-selection))
                                         (not all-optional?))
           prune-optionals          (if (not (nil? prune-optionals))
@@ -379,8 +456,8 @@
                                         (cond-> prune-optionals (multi-prune-step path))
                                         (dispatch-require-step original)))]
                    (schema-path-walker (comp middlewares vector) multi-step))
-          walked (m/walk schema walker
-                         {::m/walk-schema-refs true ::m/walk-refs true})]
+          walked (walk-selectable schema walker
+                                  {::m/walk-schema-refs true ::m/walk-refs true})]
       (when verify-selection?
         (let [invalid-selection-paths (remove @!seen selection-paths)]
           (when (seq invalid-selection-paths)
@@ -425,7 +502,7 @@
   - `[:id {:pet {:dog [:breed]}}]` - nested: `:pet` is a `:multi` with a `:dog` branch.
   With `prune-optionals`: branches stay when mentioned (or when none is mentioned); other branches are dropped.
 
-  `options`:
+  `options` (also passed to `malli.core/schema`, so malli options such as `:registry` work):
   - `verify-selection` - what to do when `selection` contains paths not in `schema`. Defaults to `*verify-selection*` (initially `:throw`):
     - `:throw` (`:assert` works as well) - throw an `ExceptionInfo` with `{:type ::unknown-paths :data {:paths ... :available ...}}` as `ex-data`.
     - `:log` - print a warning (stderr on Clojure, `console.warn` on ClojureScript) and continue.
@@ -523,14 +600,15 @@
     (person-selector [:name] {:prune-optionals true})) ;; what `select-only` does
   ```
   "
-  [schema]
-  (let [optionalized-schema (select schema)
-        multi-paths         (multi-branch-keys optionalized-schema)]
-    (fn selector-select
-      ([selection] (selector-select selection nil))
-      ([selection options]
-       (-select optionalized-schema selection
-                (merge {::optionalized true ::multi-paths multi-paths} options))))))
+  ([schema] (selector schema nil))
+  ([schema options]
+   (let [optionalized-schema (select schema [] options)
+         multi-paths         (multi-branch-keys optionalized-schema)]
+     (fn selector-select
+       ([selection] (selector-select selection nil))
+       ([selection options]
+        (-select optionalized-schema selection
+                 (merge {::optionalized true ::multi-paths multi-paths} options)))))))
 
 (comment
   (def Person
