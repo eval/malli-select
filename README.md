@@ -210,6 +210,66 @@ Related: `(ms/select-only S sel)` ≡ `(ms/prune-optionals (ms/select S sel) sel
 same selection acts as require-spec, then keep-spec.
 
 
+## Designing schemas for selection
+
+Following "Maybe Not", a schema describes the *outline* of a thing: which
+attributes exist and what they mean. Whether an attribute is required, and
+any other rule that only holds in some context, belongs to the *selection*.
+In practice this gives three layers:
+
+| What                               | Where                                  | Examples                                          |
+|------------------------------------|----------------------------------------|---------------------------------------------------|
+| Meaning of a single attribute      | schema, on the attribute itself        | `[:string {:min 1}]`, `:re`, `:enum`, ranges      |
+| Meaning *across* attributes        | schema, as an "if present" check       | check-out after check-in, currency matches amount |
+| Context rules                      | on top of a selection                  | "a confirmed booking has at most 4 guests"        |
+
+``` clojure
+;; layer 2 helper: only run `f` when all of `ks` are present
+user=> (defn when-present [ks f]
+         [:fn (fn [m] (or (not-every? #(contains? m %) ks) (f m)))])
+
+user=> (def Booking
+         [:and
+          [:map
+           [:email [:re #"^[^@\s]+@[^@\s]+$"]]        ;; layer 1
+           [:guests [:int {:min 1 :max 8}]]           ;; layer 1
+           [:check-in :int]
+           [:check-out :int]]
+          (when-present [:check-in :check-out]        ;; layer 2
+            (fn [{:keys [check-in check-out]}] (< check-in check-out)))])
+
+;; a draft only needs an email; the cross-attribute check stays out of the way...
+user=> (def Draft (ms/select Booking [:email]))
+user=> (m/validate Draft {:email "a@b.nl" :check-in 5})
+true
+;; ...until both attributes are there
+user=> (m/validate Draft {:email "a@b.nl" :check-in 5 :check-out 3})
+false
+
+;; layer 3: the selection guarantees the attributes, so the rule may assume them
+user=> (def Confirmed
+         [:and (ms/select Booking [:email :guests :check-in :check-out])
+               [:fn (fn [{:keys [guests]}] (<= guests 4))]])
+user=> (m/validate Confirmed {:email "a@b.nl" :guests 6 :check-in 1 :check-out 3})
+false
+```
+
+Guidelines:
+
+- **Put constraints on attributes where you can.** They travel with the
+  attribute through every selection, and generators understand them.
+- **A `:fn` in the schema must tolerate missing attributes.** malli-select
+  cannot look inside a function: a check that assumes `:check-out` is present
+  makes `:check-out` effectively required, whatever the selection says (and
+  data generation fails). Guard it as above, inside the function.
+- **Context rules go on top of the selection**, e.g. `[:and (ms/select ...) [:fn ...]]`.
+  There the function may assume what the selection requires.
+- **A first step: is it really a value constraint?** A form field
+  submitted as `""` often means "not provided". Remove such values at the
+  boundary (with a transformer); then "must be filled in" is a plain
+  required attribute.
+
+
 ## LICENSE
 
 Copyright (c) 2026 Gert Goet, ThinkCreate.
