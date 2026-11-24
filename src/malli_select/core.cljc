@@ -186,18 +186,21 @@
                                [:street string?]]]]]])
   ;;=> #{[:addresses] [:addresses :street]}
   ```
+
+  `options` are passed to `malli.core/schema`, e.g. `{:registry ...}`.
   "
-  [schema]
-  (let [subs   (mu/subschemas schema)
-        multis (into {}
-                     (keep (fn [{s :schema p :path}]
-                             (when (= :multi (m/type s))
-                               [(clean-path p) (into #{} (map first) (m/children s))])))
-                     subs)]
-    (->> subs
-         (map (comp #(tag-path multis %) clean-path :path))
-         (filter seq)
-         set)))
+  ([schema] (selectable-paths schema nil))
+  ([schema options]
+   (let [subs   (mu/subschemas (m/schema schema options))
+         multis (into {}
+                      (keep (fn [{s :schema p :path}]
+                              (when (= :multi (m/type s))
+                                [(clean-path p) (into #{} (map first) (m/children s))])))
+                      subs)]
+     (->> subs
+          (map (comp #(tag-path multis %) clean-path :path))
+          (filter seq)
+          set))))
 
 
 (defn- star-available
@@ -239,7 +242,8 @@
     {verify-selection *verify-selection*}}]
   (letfn [(in? [coll elm]
             (some #(= % elm) coll))]
-    (let [all-optional?            (empty? selection)
+    (let [schema                   (m/schema schema options)
+          all-optional?            (empty? selection)
           verify-selection?        (and (not (in? #{nil false :skip} verify-selection))
                                         (not all-optional?))
           prune-optionals          (if (not (nil? prune-optionals))
@@ -425,7 +429,7 @@
   - `[:id {:pet {:dog [:breed]}}]` - nested: `:pet` is a `:multi` with a `:dog` branch.
   With `prune-optionals`: branches stay when mentioned (or when none is mentioned); other branches are dropped.
 
-  `options`:
+  `options` (also passed to `malli.core/schema`, so malli options such as `:registry` work):
   - `verify-selection` - what to do when `selection` contains paths not in `schema`. Defaults to `*verify-selection*` (initially `:throw`):
     - `:throw` (`:assert` works as well) - throw an `ExceptionInfo` with `{:type ::unknown-paths :data {:paths ... :available ...}}` as `ex-data`.
     - `:log` - print a warning (stderr on Clojure, `console.warn` on ClojureScript) and continue.
@@ -523,14 +527,15 @@
     (person-selector [:name] {:prune-optionals true})) ;; what `select-only` does
   ```
   "
-  [schema]
-  (let [optionalized-schema (select schema)
-        multi-paths         (multi-branch-keys optionalized-schema)]
-    (fn selector-select
-      ([selection] (selector-select selection nil))
-      ([selection options]
-       (-select optionalized-schema selection
-                (merge {::optionalized true ::multi-paths multi-paths} options))))))
+  ([schema] (selector schema nil))
+  ([schema options]
+   (let [optionalized-schema (select schema [] options)
+         multi-paths         (multi-branch-keys optionalized-schema)]
+     (fn selector-select
+       ([selection] (selector-select selection nil))
+       ([selection options]
+        (-select optionalized-schema selection
+                 (merge {::optionalized true ::multi-paths multi-paths} options)))))))
 
 (comment
   (def Person

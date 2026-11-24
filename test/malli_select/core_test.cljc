@@ -506,6 +506,40 @@
         (is (every? #(= :human (:type %)) (mg/sample s))
             "no samples from dropped branches")))))
 
+(deftest options-forwarding-test
+  (let [registry (merge (m/default-schemas)
+                        {::non-empty-string [:string {:min 1}]
+                         ::lat-lon          [:map [:lat :double] [:lon :double]]})
+        opts     {:registry registry}
+        Place    [:map
+                  [:name ::non-empty-string]
+                  [:location ::lat-lon]]]
+    (testing "select resolves a raw vector with the :registry option"
+      (let [s (select Place [:name] opts)]
+        (is (m/validate s {:name "Home"}))
+        (is (not (m/validate s {:name ""})) "type constraint of the registry entry applies")
+        (is (not (m/validate s {})) ":name is required")))
+    (testing "selecting into a registry type"
+      (let [s (select Place [{:location [:lat]}] opts)]
+        (is (m/validate s {:location {:lat 1.0}}))
+        (is (not (m/validate s {:location {:lon 1.0}})))))
+    (testing "select-only and prune-optionals forward options"
+      (is (= [:map [:name ::non-empty-string]]
+             (m/form (select-only Place [:name] opts))))
+      (is (= [:map [:name ::non-empty-string]]
+             (m/form (prune-optionals [:map
+                                       [:name ::non-empty-string]
+                                       [:nickname {:optional true} ::non-empty-string]]
+                                      [] opts)))))
+    (testing "selector and selectable-paths accept options"
+      (is (m/validate ((selector Place opts) [:name]) {:name "Home"}))
+      (is (= #{[:name] [:location] [:location :lat] [:location :lon]}
+             (sut/selectable-paths Place opts))))
+    (testing "verification still works with options"
+      (is (thrown-with-msg? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                            #"unknown-paths"
+                            (select Place [:nope] opts))))))
+
 (comment
   (select [:map [:address [:map [:street string?]]]] [{:address [:street]}] {:prune-optionals true})
 

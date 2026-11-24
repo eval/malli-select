@@ -33,6 +33,15 @@
 - The dynamic var `*verify-selection*` (initially `:throw`) provides the
   default for the `:verify-selection` option; an explicitly passed option
   still wins.
+- `selectable-paths` and `selector` take an optional `options` argument.
+
+### Fixed
+
+- `options` of `select`, `select-only`, `prune-optionals`, `selector` and
+  `selectable-paths` are now passed to `malli.core/schema`. So malli options
+  like `:registry` work when you pass a schema as a vector:
+  `(select [:map [:name ::my-type]] [:name] {:registry registry})`. Before
+  this change it threw `:malli.core/invalid-schema`.
 
 ### Breaking
 
